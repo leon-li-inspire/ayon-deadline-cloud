@@ -47,22 +47,40 @@ BIWhite='\033[1;97m'      # White
 ###############################################################################
 detect_python () {
   echo -e "${BIGreen}>>>${RST} Using python \c"
-  command -v python >/dev/null 2>&1 || { echo -e "${BIRed}- NOT FOUND${RST} ${BIYellow}You need Python 3.9 installed to continue.${RST}"; return 1; }
+  command -v python >/dev/null 2>&1 || { echo -e "${BIRed}- NOT FOUND${RST} ${BIYellow}You need Python 3.11 installed to continue.${RST}"; return 1; }
   local version_command="import sys;print('{0}.{1}'.format(sys.version_info[0], sys.version_info[1]))"
   local python_version="$(python <<< ${version_command})"
   oIFS="$IFS"
   IFS=.
   set -- $python_version
   IFS="$oIFS"
-  if [ "$1" -ge "3" ] && [ "$2" -ge "9" ] ; then
-    if [ "$2" -gt "9" ] ; then
-      echo -e "${BIWhite}[${RST} ${BIRed}$1.$2 ${BIWhite}]${RST} - ${BIRed}FAILED${RST} ${BIYellow}Version is new and unsupported, use${RST} ${BIPurple}3.9.x${RST}"; return 1;
+  if [ "$1" -ge "3" ] && [ "$2" -ge "11" ] ; then
+    if [ "$2" -gt "11" ] ; then
+      echo -e "${BIWhite}[${RST} ${BIRed}$1.$2 ${BIWhite}]${RST} - ${BIRed}FAILED${RST} ${BIYellow}Version is new and unsupported, use${RST} ${BIPurple}3.11.x${RST}"; return 1;
     else
       echo -e "${BIWhite}[${RST} ${BIGreen}$1.$2${RST} ${BIWhite}]${RST}"
     fi
   else
     command -v python >/dev/null 2>&1 || { echo -e "${BIRed}$1.$2$ - ${BIRed}FAILED${RST} ${BIYellow}Version is old and unsupported${RST}"; return 1; }
   fi
+}
+
+##############################################################################
+# Clean pyc files in specified directory
+# Globals:
+#   None
+# Arguments:
+#   Optional path to clean
+# Returns:
+#   None
+###############################################################################
+clean_pyc () {
+  local path
+  path=$repo_root
+  echo -e "${BIGreen}>>>${RST} Cleaning pyc at [ ${BIWhite}$path${RST} ] ... \c"
+  find "$path" -path ./build -o -regex '^.*\(__pycache__\|\.py[co]\)$' -delete
+
+  echo -e "${BIGreen}DONE${RST}"
 }
 
 install_uv () {
@@ -141,6 +159,11 @@ default_help() {
   echo -e "  ${BWhite}ruff-check${RST}      ${BCyan}Run Ruff check for the repository${RST}"
   echo -e "  ${BWhite}ruff-fix${RST}        ${BCyan}Run Ruff fix for the repository${RST}"
   echo -e "  ${BWhite}codespell${RST}       ${BCyan}Run codespell check for the repository${RST}"
+  echo -e "  ${BWhite}build-docs${RST}      ${BCyan}Build documentation using mkdocs${RST}"
+  echo -e "  ${BWhite}serve-docs${RST}      ${BCyan}Serve documentation using mkdocs${RST}"
+  echo -e "  ${BWhite}clear-cache${RST}     ${BCyan}Clear Python cache files${RST}"
+  echo -e "  ${BWhite}run${RST}             ${BCyan}Run a command in the virtual environment${RST}"
+  echo -e "  ${BWhite}run-tests${RST}       ${BCyan}Run tests in the virtual environment${RST}"
   echo ""
 }
 
@@ -157,6 +180,16 @@ run_ruff_check () {
 run_codespell () {
   echo -e "${BIGreen}>>>${RST} Running codespell check ..."
   uv run codespell
+}
+
+build_docs () {
+  echo -e "${BIGreen}>>>${RST} Building documentation ..."
+  uv run mkdocs build
+}
+
+serve_docs () {
+  echo -e "${BIGreen}>>>${RST} Serving documentation ..."
+  uv run mkdocs serve
 }
 
 main () {
@@ -193,6 +226,19 @@ main () {
       ;;
     "runtests")
       run_tests "$@" || return_code=$?
+      exit $return_code
+      ;;
+    "builddocs")
+      build_docs || return_code=$?
+      exit $return_code
+      ;;
+
+    "servedocs")
+      serve_docs || return_code=$?
+      exit $return_code
+      ;;
+    "clearcache")
+      clean_pyc || return_code=$?
       exit $return_code
       ;;
   esac
