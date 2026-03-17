@@ -67,7 +67,7 @@ graph TD
     L -.->|register versions| E
 ```
 
-> **Note on job structure**: Deadline Cloud models render and post-render as *steps within a single job*, not as separate jobs. Step dependencies (`dependencies: [dependsOn: RenderStep]`) ensure the post-render step only runs after the render step completes. This is the native Deadline Cloud pattern — the submitter creates a single OJD job template with multiple steps. The post-render step can access the render step's outputs via step-level job attachment syncing.
+> **Note on job structure**: Deadline Cloud models render and post-render as *steps within a single job*, not as separate jobs. Step dependencies (`dependencies: [dependsOn: RenderStep]`) ensure the post-render step only runs after the render step completes. This is the native Deadline Cloud pattern — the submitter creates a single OJD job template with multiple steps. The post-render step can access the render step's outputs via step-level job attachment syncing. See [Step dependencies](https://docs.aws.amazon.com/deadline-cloud/latest/developerguide/build-jobs-scheduling.html), [Using files from a step in a dependent step](https://docs.aws.amazon.com/deadline-cloud/latest/developerguide/using-files-output-from-a-step-in-a-dependent-step.html), and [OJD StepTemplate schema](https://github.com/OpenJobDescription/openjd-specifications/wiki/2023-09-Template-Schemas).
 
 ## Sequence Diagrams
 
@@ -143,7 +143,7 @@ sequenceDiagram
 
 AWS Deadline Cloud provides two options for managing input and output data:
 
-### Option 1: Job Attachments
+### Option 1: [Job Attachments](https://docs.aws.amazon.com/deadline-cloud/latest/developerguide/build-job-attachments.html)
 
 Deadline Cloud transfers data to and from Cloud Workers using S3 buckets:
 - **Input sync**: Scene files and assets are uploaded to S3 and synced to workers when the job starts
@@ -151,9 +151,9 @@ Deadline Cloud transfers data to and from Cloud Workers using S3 buckets:
 - **Linux VFS mount**: On Linux workers, job attachments can be mounted as a virtual filesystem for standard file access
 - **Output retrieval**: The Deadline CLI provides commands to download job outputs, which can be run manually or as a scheduled CRON job
 - **Automatic output downloads (TBD)**: Deadline Cloud supports automatic output downloads via `deadline queue sync-output` configured as a cron job or scheduled task. This requires additional setup: dedicated long-term IAM credentials (not Deadline Cloud Monitor credentials), a storage profile with all output paths configured, and a checkpoint directory for tracking download progress. See [AWS docs: Automatic downloads](https://docs.aws.amazon.com/deadline-cloud/latest/userguide/auto-downloads.html). The exact integration approach (whether AYON manages this configuration or defers to studio-level setup) is TBD.
-- **No direct S3 access**: Render output data is encrypted and cannot be accessed directly from S3 buckets. All output retrieval must go through the Deadline Cloud CLI output download mechanism (e.g., `deadline job download-output` or `deadline queue sync-output`). This is a hard constraint of the job attachments mode.
+- **No direct S3 access**: Render output data is encrypted and cannot be accessed directly from S3 buckets. All output retrieval must go through the Deadline Cloud CLI output download mechanism (e.g., [`deadline job download-output`](https://docs.aws.amazon.com/deadline-cloud/latest/developerguide/getting-output-files-from-a-job.html) or [`deadline queue sync-output`](https://docs.aws.amazon.com/deadline-cloud/latest/userguide/auto-downloads.html)). This is a hard constraint of the job attachments mode.
 
-### Option 2: Shared Storage (Storage Profiles)
+### Option 2: [Shared Storage (Storage Profiles)](https://docs.aws.amazon.com/deadline-cloud/latest/userguide/storage-profile-shared-file.html)
 
 Uses storage profiles to remap paths between different filesystems and platforms:
 - **Path remapping**: Automatically translates paths between Windows, Linux, and macOS workers
@@ -419,7 +419,7 @@ The AYON integration overrides this behavior when `conda_config.packages` is con
 
 Key override rules:
 - If `conda_config.packages` is non-empty, AYON builds the `CondaPackages` parameter value from settings instead of using auto-detection
-- `CondaPackages` and `CondaChannels` are queue environment parameters — the default conda queue environment adds these as job parameters at submission time. The submitter populates them based on the DCC application. AYON overrides these parameter values before submission.
+- `CondaPackages` and `CondaChannels` are [queue environment parameters](https://docs.aws.amazon.com/deadline-cloud/latest/userguide/create-queue-environment.html) — the default conda queue environment adds these as job parameters at submission time. The submitter populates them based on the DCC application. AYON overrides these parameter values before submission.
 - The Maya version always comes from AYON server settings (not auto-detected from the artist's DCC)
 - For `maya-openjd`, the version depends on what's installed on the artist's machine when `version="auto"` is set — this allows the adaptor version to track the artist's local installation while still being explicitly controllable
 - If `conda_config.channels` is non-empty, those channels override the default conda channels
@@ -427,7 +427,7 @@ Key override rules:
 
 > **Integration Consideration**: This override may conflict with the native submitter's auto-detection logic. The AYON integration explicitly takes precedence. Studios should be aware that enabling conda config in AYON settings will suppress the submitter's built-in version resolution. This is documented as a known integration point that requires coordination between AYON addon updates and Deadline Cloud submitter updates.
 
-> **Conda Version Pinning**: AWS recommends pinning to major.minor versions only (e.g., `maya=2026`, not `maya=2026.1`), because patch releases replace previous packages on the `deadline-cloud` channel. Pinning to a specific patch version will cause submissions to fail when that patch is superseded. The AYON settings UI should guide studios toward this best practice.
+> **Conda Version Pinning**: AWS recommends pinning to major.minor versions only (e.g., `maya=2026`, not `maya=2026.1`), because patch releases replace previous packages on the `deadline-cloud` channel. Pinning to a specific patch version will cause submissions to fail when that patch is superseded. The AYON settings UI should guide studios toward this best practice. See [Default conda queue environment](https://docs.aws.amazon.com/deadline-cloud/latest/userguide/create-queue-environment.html) for the full list of available packages and pinning guidance.
 
 #### Queue Resolution
 
@@ -441,12 +441,12 @@ This allows studios to define all available queues centrally, set a global defau
 
 #### Host Requirements Override Behavior
 
-The native Deadline Cloud Submitter exposes host requirements in its job settings UI (OS family, vCPU, memory, GPU). The AYON integration allows studios to override these from server settings via `HostRequirements`.
+The native Deadline Cloud Submitter exposes host requirements in its [Host requirements tab](https://docs.aws.amazon.com/deadline-cloud/latest/userguide/jobs-using-submitter.html) (OS family, vCPU, memory, GPU). The AYON integration allows studios to override these from server settings via `HostRequirements`.
 
 Key override rules:
 - Only non-None fields in `HostRequirements` override the submitter's values — unset fields preserve the submitter's defaults or artist's manual selections
 - This is a partial override model: studios can pin OS family and GPU requirements while leaving CPU/memory to the submitter defaults
-- Host requirements are injected into the OJD template's `hostRequirements` section before submission
+- Host requirements are injected into the OJD template's [`hostRequirements` section](https://github.com/OpenJobDescription/openjd-specifications/wiki/2023-09-Template-Schemas) before submission. The OJD spec defines standard amount capabilities (`amount.worker.vcpu`, `amount.worker.memory`, `amount.worker.gpu`, `amount.worker.gpu.memory`) and attribute capabilities (`attr.worker.os.family`). See [Schedule jobs — Determine fleet compatibility](https://docs.aws.amazon.com/deadline-cloud/latest/developerguide/build-jobs-scheduling.html) for how host requirements interact with fleet capabilities.
 - If all fields are None (default), the submitter's host requirements are preserved entirely (backward compatible)
 
 > **Integration Consideration**: Host requirements interact with Deadline Cloud's fleet configuration. Studios should ensure that the configured requirements match available fleet capacity — e.g., requesting GPU workers when no GPU fleet is provisioned will cause jobs to remain queued indefinitely.
@@ -498,7 +498,12 @@ class ValidateRenderSettings:
 
 ### Component 5: Post-Render Script (`client/scripts/post_render.py`)
 
-**Purpose**: Runs as a Deadline Cloud step after rendering completes (dependent step within the same job). Handles output validation, transcoding, burnin application, and version registration in AYON.
+> **TBD — Execution Model**: It is to be discussed whether the post-render processing should run as a dependent step within the Deadline Cloud job (on a farm worker) or be executed locally within the AYON pipeline (on the artist's workstation or a dedicated processing machine). Key trade-offs:
+> - **Farm step**: Runs close to rendered data (especially with job attachments), scales with farm capacity, but requires AYON server access from farm workers and complicates credential management.
+> - **Local AYON pipeline**: Keeps all AYON logic local, simpler credential handling, but requires downloading all rendered outputs first and doesn't leverage farm compute for transcoding/burnins.
+> This decision affects the architecture of the post-render pipeline and how outputs are accessed. The current design documents both paths.
+
+**Purpose**: Handles output validation, transcoding, burnin application, and version registration in AYON after rendering completes. May run as a Deadline Cloud dependent step (on farm) or locally within the AYON pipeline (see TBD above).
 
 **Publishing Process**:
 Publishing is the process where a version is registered in AYON. Beyond registration, various operations run during publishing:
@@ -1274,8 +1279,8 @@ The following properties must hold for the integration to be correct:
 ## Job Monitoring
 
 Job progress can be monitored via:
-- **Deadline Cloud Monitor**: A web-based UI created via the `CreateMonitor` API (requires IAM Identity Center setup). This is a management-level tool for viewing farms, queues, and fleets — not a per-job programmatic API.
-- **Deadline Cloud API**: Programmatic job status tracking via `GetJob`, `SearchSteps`, `SearchTasks` API calls. This enables real-time progress tracking from within AYON.
+- **Deadline Cloud Monitor**: A web-based UI created via the [`CreateMonitor` API](https://docs.aws.amazon.com/deadline-cloud/latest/APIReference/API_CreateMonitor.html) (requires IAM Identity Center setup). This is a management-level tool for viewing farms, queues, and fleets — not a per-job programmatic API.
+- **Deadline Cloud API**: Programmatic job status tracking via [`GetJob`](https://docs.aws.amazon.com/deadline-cloud/latest/APIReference/API_GetJob.html), [`SearchSteps`](https://docs.aws.amazon.com/deadline-cloud/latest/APIReference/API_SearchSteps.html), [`SearchTasks`](https://docs.aws.amazon.com/deadline-cloud/latest/APIReference/API_SearchTasks.html) API calls. This enables real-time progress tracking from within AYON.
 - **Deadline Cloud CLI**: `deadline job get` and related commands for command-line monitoring.
 
 For MVP, monitoring is informational only — artists can check job status via the Deadline Cloud Monitor UI or the AYON Publisher. Deeper integration (automatic retries, AYON task status updates) is deferred to post-MVP.
