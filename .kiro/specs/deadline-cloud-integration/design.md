@@ -14,7 +14,7 @@ The key architectural principle is **separation of responsibilities**: AYON owns
 
 - **Studio-configurable validations**: Pre-submission validation plugins that run before any resource-intensive operations. Includes both built-in technical validations (renderable camera exists, valid frame range) and studio-defined custom validations (required AOVs, render settings checks).
 - **Publishing and processing results**: Version registration in AYON, transcoding, reviewable creation, burnins, file movement/renaming via path templates.
-- **Basic job dependencies**: Render → Post-render (publish) dependency chain.
+- **Basic job dependencies**: Render → Post-render (publish) dependency chain within a single job using OJD step dependencies.
 
 ### Deferred (Post-MVP)
 
@@ -45,9 +45,8 @@ graph TD
     subgraph "AWS Deadline Cloud"
         D --> H[Deadline Cloud Submitter Tool]
         H -->|OJD Job Bundle| I[Deadline Cloud API]
-        I --> J[Render Jobs]
-        J --> K[Post-Render Job]
-        I -.->|CreateMonitor| MON[Job Monitor API]
+        I --> J[Render Step]
+        J --> K[Post-Render Step]
     end
 
     subgraph "Post-Render Pipeline"
@@ -67,6 +66,8 @@ graph TD
     L -->|access outputs| S2
     L -.->|register versions| E
 ```
+
+> **Note on job structure**: Deadline Cloud models render and post-render as *steps within a single job*, not as separate jobs. Step dependencies (`dependencies: [dependsOn: RenderStep]`) ensure the post-render step only runs after the render step completes. This is the native Deadline Cloud pattern — the submitter creates a single OJD job template with multiple steps. The post-render step can access the render step's outputs via step-level job attachment syncing.
 
 ## Sequence Diagrams
 
@@ -97,13 +98,11 @@ sequenceDiagram
         Publisher->>Bridge: Submit via Deadline Cloud
         Bridge->>Bridge: Map AYON instances to Submitter params
         Bridge->>Submitter: Pre-populate settings & invoke submission
-        Submitter->>DC: CreateJob (render job)
+        Submitter->>DC: CreateJob (single job with render + post-render steps)
         DC-->>Submitter: job_id
-        Submitter->>DC: CreateJob (post-render job, depends on render)
-        DC-->>Submitter: post_job_id
-        Submitter-->>Bridge: Submission result (job IDs)
+        Submitter-->>Bridge: Submission result (job ID, step IDs)
         Bridge-->>Publisher: Submission complete
-        Publisher-->>Artist: Show success with job IDs
+        Publisher-->>Artist: Show success with job ID
     end
 ```
 
@@ -116,7 +115,7 @@ sequenceDiagram
     participant CLI as Deadline Cloud CLI
     participant AYON as AYON Server API
 
-    DC->>Script: Trigger post-render job (render complete)
+    DC->>Script: Trigger post-render step (render step complete)
 
     alt Job Attachments Mode
         Script->>CLI: deadline job download-output
@@ -211,6 +210,14 @@ class HostRequirements(BaseSettingsModel):
     job settings. When set, these values are injected into the OJD
     template's hostRequirements section, replacing the submitter defaults.
     All fields are optional — only non-None values override the submitter.
+    
+    OJD mapping:
+    - os_family → attributes: [{name: "attr.worker.os.family", anyOf: [value]}]
+    - cpu_arch → attributes: [{name: "attr.worker.cpu.arch", anyOf: [value]}]
+    - min/max_vcpu → amounts: [{name: "amount.worker.vcpu", min/max: value}]
+    - min/max_memory_mib → amounts: [{name: "amount.worker.memory", min/max: value}]
+    - min/max_gpu → amounts: [{name: "amount.worker.gpu", min/max: value}]
+    - min/max_gpu_memory_mib → amounts: [{name: "amount.worker.gpu.memory", min/max: value}]
     """
     os_family: str | None = None           # "linux", "windows", "macos"
     cpu_arch: str | None = None            # "x86_64", "arm64"
@@ -220,8 +227,8 @@ class HostRequirements(BaseSettingsModel):
     max_memory_mib: int | None = None      # Maximum memory in MiB
     min_gpu: int | None = None             # Minimum GPU count
     max_gpu: int | None = None             # Maximum GPU count
-    min_gpu_memory_mib: int | None = None  # Minimum GPU memory in MiB
-    max_gpu_memory_mib: int | None = None  # Maximum GPU memory in MiB
+    min_gpu_memory_mib: int | None = None  # Minimum GPU memory in MiB (per-GPU lower bound)
+    max_gpu_memory_mib: int | None = None  # Maximum GPU memory in MiB (per-GPU lower bound)
 
 class CondaPackage(BaseSettingsModel):
     """A single conda package specification."""
@@ -412,12 +419,15 @@ The AYON integration overrides this behavior when `conda_config.packages` is con
 
 Key override rules:
 - If `conda_config.packages` is non-empty, AYON builds the `CondaPackages` parameter value from settings instead of using auto-detection
+- `CondaPackages` and `CondaChannels` are queue environment parameters — the default conda queue environment adds these as job parameters at submission time. The submitter populates them based on the DCC application. AYON overrides these parameter values before submission.
 - The Maya version always comes from AYON server settings (not auto-detected from the artist's DCC)
 - For `maya-openjd`, the version depends on what's installed on the artist's machine when `version="auto"` is set — this allows the adaptor version to track the artist's local installation while still being explicitly controllable
 - If `conda_config.channels` is non-empty, those channels override the default conda channels
 - If `conda_config` is empty/default, the native submitter's auto-detection behavior is preserved (backward compatible)
 
 > **Integration Consideration**: This override may conflict with the native submitter's auto-detection logic. The AYON integration explicitly takes precedence. Studios should be aware that enabling conda config in AYON settings will suppress the submitter's built-in version resolution. This is documented as a known integration point that requires coordination between AYON addon updates and Deadline Cloud submitter updates.
+
+> **Conda Version Pinning**: AWS recommends pinning to major.minor versions only (e.g., `maya=2026`, not `maya=2026.1`), because patch releases replace previous packages on the `deadline-cloud` channel. Pinning to a specific patch version will cause submissions to fail when that patch is superseded. The AYON settings UI should guide studios toward this best practice.
 
 #### Queue Resolution
 
@@ -444,9 +454,9 @@ Key override rules:
 **Responsibilities**:
 - Translate AYON render instances into Deadline Cloud Submitter parameters
 - Pre-populate the Submitter with AYON settings before submission
-- Attach post-render job configuration to the submission
-- Return job IDs and status back to the AYON publish pipeline
-- Support job progress monitoring via the Deadline Cloud API (`CreateMonitor`)
+- Attach post-render step configuration to the submission
+- Return job ID and step IDs back to the AYON publish pipeline
+- Support job progress monitoring via the Deadline Cloud API (`GetJob`, `SearchSteps`, `SearchTasks`)
 
 ### Component 4: Validation Plugins (`client/plugins/validate_*.py`)
 
@@ -488,7 +498,7 @@ class ValidateRenderSettings:
 
 ### Component 5: Post-Render Script (`client/scripts/post_render.py`)
 
-**Purpose**: Runs as a Deadline Cloud job after rendering completes. Handles output validation, transcoding, burnin application, and version registration in AYON.
+**Purpose**: Runs as a Deadline Cloud step after rendering completes (dependent step within the same job). Handles output validation, transcoding, burnin application, and version registration in AYON.
 
 **Publishing Process**:
 Publishing is the process where a version is registered in AYON. Beyond registration, various operations run during publishing:
@@ -591,7 +601,7 @@ class SubmissionParams:
 ```python
 @dataclass
 class PostRenderConfig:
-    """Configuration passed to the post-render job."""
+    """Configuration passed to the post-render step."""
     ayon_project: str
     ayon_folder_path: str
     ayon_task: str
@@ -619,8 +629,9 @@ class PostRenderConfig:
 class SubmissionResult:
     """Result returned after submitting to Deadline Cloud."""
     success: bool
-    render_job_id: str | None
-    post_render_job_id: str | None
+    job_id: str | None                     # Single job containing both render and post-render steps
+    render_step_id: str | None = None
+    post_render_step_id: str | None = None
     error_message: str | None = None
     submitted_instances: list[str] = field(default_factory=list)
 ```
@@ -746,7 +757,7 @@ def submit(
     """Submit render instances to Deadline Cloud via the Submitter tool.
 
     Maps each instance to submission params, pre-populates the Submitter,
-    and invokes submission. Creates both render and post-render jobs.
+    and invokes submission. Creates a single job with render and post-render steps.
     """
 ```
 
@@ -757,9 +768,9 @@ def submit(
 - Deadline Cloud Submitter tool is available and authenticated
 
 **Postconditions:**
-- If successful: `result.success is True`, `result.render_job_id` and `result.post_render_job_id` are valid job IDs
+- If successful: `result.success is True`, `result.job_id` is a valid job ID, `result.render_step_id` and `result.post_render_step_id` are valid step IDs within that job
 - If failed: `result.success is False`, `result.error_message` describes the failure
-- Post-render job has a dependency on the render job (runs only after render completes)
+- Post-render step has a dependency on the render step (runs only after render completes successfully)
 - `result.submitted_instances` lists all instance names that were submitted
 - No partial submissions: either all instances submit or none do
 
@@ -885,19 +896,19 @@ def execute_submission(publisher_context, settings):
         # Pre-populate submitter with AYON-derived settings
         pre_populate_submitter(submitter, params)
 
-        # Submit render job
-        render_job_id = submitter.submit_job(params)
-
-        # Submit post-render job with dependency on render job
+        # Submit single job with render step + post-render step
+        # The OJD job template contains both steps, with the post-render
+        # step declaring a dependency on the render step:
+        #   dependencies:
+        #     - dependsOn: RenderStep
         post_config = build_post_render_config(instance, settings)
-        post_job_id = submitter.submit_post_job(
-            post_config, depends_on=render_job_id
-        )
+        job_result = submitter.submit_job(params, post_config)
 
         results.append(SubmissionResult(
             success=True,
-            render_job_id=render_job_id,
-            post_render_job_id=post_job_id,
+            job_id=job_result.job_id,
+            render_step_id=job_result.render_step_id,
+            post_render_step_id=job_result.post_render_step_id,
             submitted_instances=[instance.instance_name],
         ))
 
@@ -914,7 +925,9 @@ def execute_post_render(config: PostRenderConfig, settings: PostRenderSettings):
     INPUT: config (PostRenderConfig from submission), settings (PostRenderSettings)
     OUTPUT: success (bool)
 
-    Runs as a Deadline Cloud job after rendering completes.
+    Runs as a dependent step within the same Deadline Cloud job, after the
+    render step completes. The step dependency ensures this only executes
+    when all render tasks have succeeded.
     """
 
     # Step 1: Download render outputs (mandatory for job attachments mode)
@@ -1150,8 +1163,9 @@ result = bridge.submit(
     settings=addon_settings,
 )
 if result.success:
-    print(f"Render job: {result.render_job_id}")
-    print(f"Post-render job: {result.post_render_job_id}")
+    print(f"Job: {result.job_id}")
+    print(f"Render step: {result.render_step_id}")
+    print(f"Post-render step: {result.post_render_step_id}")
 else:
     print(f"Submission failed: {result.error_message}")
 
@@ -1209,7 +1223,7 @@ The following properties must hold for the integration to be correct:
 
 3. **Validation Gate**: For all render instances `i`, if any validation plugin reports failure on `i`, then `i` is never submitted to Deadline Cloud. Formally: `∀i: validation_failed(i) ⟹ ¬submitted(i)`.
 
-4. **Post-Render Ordering**: For all post-render jobs `p` with dependency on render job `r`, `p` executes only after `r` completes successfully. Formally: `∀(r, p): depends_on(p, r) ⟹ completed(r) before started(p)`.
+4. **Post-Render Ordering**: For all post-render steps `p` with dependency on render step `r` within the same job, `p` executes only after `r` completes successfully. This is enforced by OJD step dependencies (`dependencies: [dependsOn: RenderStep]`). Formally: `∀(r, p): depends_on(p, r) ⟹ completed(r) before started(p)`.
 
 5. **Frame Completeness**: For all post-render validations, the set of discovered files must be a superset of expected files for the validation to pass. Formally: `∀v: v.is_valid ⟹ expected_files ⊆ discovered_files`.
 
@@ -1241,15 +1255,15 @@ The following properties must hold for the integration to be correct:
 
 ### Error Scenario 3: Partial Render Failure (Missing Frames)
 
-**Condition**: Render job completes but some frames are missing or corrupt.
-**Response**: Post-render validation detects missing/corrupt files, reports the specific frames affected, and marks the Deadline Cloud job as failed.
-**Recovery**: Artist can re-submit only the failed frames (if supported) or re-submit the entire job. The post-render job does not register a partial version.
+**Condition**: Render step completes but some frames are missing or corrupt.
+**Response**: Post-render step validation detects missing/corrupt files, reports the specific frames affected, and marks the step as failed.
+**Recovery**: Artist can re-submit the job or re-queue failed tasks. The post-render step does not register a partial version.
 
 ### Error Scenario 4: AYON Server Unreachable During Post-Render
 
 **Condition**: Post-render script cannot reach the AYON server to register the version.
-**Response**: Retry with exponential backoff (3 attempts, 5s/15s/45s delays). If all retries fail, mark the Deadline Cloud job as failed with the connection error.
-**Recovery**: Once AYON server is back, the post-render job can be manually retried from the Deadline Cloud console.
+**Response**: Retry with exponential backoff (3 attempts, 5s/15s/45s delays). If all retries fail, mark the step as failed with the connection error.
+**Recovery**: Once AYON server is back, the failed step can be manually retried from the Deadline Cloud console.
 
 ### Error Scenario 5: Invalid Farm Profile Configuration
 
@@ -1259,10 +1273,10 @@ The following properties must hold for the integration to be correct:
 
 ## Job Monitoring
 
-Job progress can be monitored via the Deadline Cloud API using `CreateMonitor`. This enables:
-- Real-time progress tracking of render jobs from within AYON
-- Notification when jobs complete, fail, or require attention
-- Integration with AYON's event system for automated status updates
+Job progress can be monitored via:
+- **Deadline Cloud Monitor**: A web-based UI created via the `CreateMonitor` API (requires IAM Identity Center setup). This is a management-level tool for viewing farms, queues, and fleets — not a per-job programmatic API.
+- **Deadline Cloud API**: Programmatic job status tracking via `GetJob`, `SearchSteps`, `SearchTasks` API calls. This enables real-time progress tracking from within AYON.
+- **Deadline Cloud CLI**: `deadline job get` and related commands for command-line monitoring.
 
 For MVP, monitoring is informational only — artists can check job status via the Deadline Cloud Monitor UI or the AYON Publisher. Deeper integration (automatic retries, AYON task status updates) is deferred to post-MVP.
 
