@@ -113,9 +113,18 @@ sequenceDiagram
 sequenceDiagram
     participant DC as Deadline Cloud
     participant Script as Post-Render Script
+    participant CLI as Deadline Cloud CLI
     participant AYON as AYON Server API
 
     DC->>Script: Trigger post-render job (render complete)
+
+    alt Job Attachments Mode
+        Script->>CLI: deadline job download-output
+        CLI-->>Script: Downloaded output files to local path
+    else Shared Storage Mode
+        Script->>Script: Access outputs directly via remapped paths
+    end
+
     Script->>Script: Discover rendered output files
     Script->>Script: Validate outputs (frame completeness, file integrity)
 
@@ -142,6 +151,8 @@ Deadline Cloud transfers data to and from Cloud Workers using S3 buckets:
 - **Output sync**: Rendered outputs are synced back to the workstation when the job finishes
 - **Linux VFS mount**: On Linux workers, job attachments can be mounted as a virtual filesystem for standard file access
 - **Output retrieval**: The Deadline CLI provides commands to download job outputs, which can be run manually or as a scheduled CRON job
+- **Automatic output downloads (TBD)**: Deadline Cloud supports automatic output downloads via `deadline queue sync-output` configured as a cron job or scheduled task. This requires additional setup: dedicated long-term IAM credentials (not Deadline Cloud Monitor credentials), a storage profile with all output paths configured, and a checkpoint directory for tracking download progress. See [AWS docs: Automatic downloads](https://docs.aws.amazon.com/deadline-cloud/latest/userguide/auto-downloads.html). The exact integration approach (whether AYON manages this configuration or defers to studio-level setup) is TBD.
+- **No direct S3 access**: Render output data is encrypted and cannot be accessed directly from S3 buckets. All output retrieval must go through the Deadline Cloud CLI output download mechanism (e.g., `deadline job download-output` or `deadline queue sync-output`). This is a hard constraint of the job attachments mode.
 
 ### Option 2: Shared Storage (Storage Profiles)
 
@@ -154,9 +165,9 @@ Uses storage profiles to remap paths between different filesystems and platforms
 ### Post-Render Script Access
 
 The post-render script accesses rendered outputs via:
-1. **Job attachments**: Download outputs using Deadline CLI before processing
-2. **Shared storage**: Direct filesystem access using remapped paths from storage profiles
-3. **Hybrid**: Combination based on storage configuration
+1. **Job attachments**: Outputs must first be downloaded using the Deadline Cloud CLI (`deadline job download-output`) before any processing. There is no direct S3 access — data is encrypted and can only be retrieved through the CLI download mechanism. This adds a mandatory "download outputs" step as the first operation in the post-render pipeline. Alternatively, if automatic downloads are configured (`deadline queue sync-output` as a cron job), outputs may already be available locally — but this requires additional IAM and storage profile setup (TBD, see [AWS docs](https://docs.aws.amazon.com/deadline-cloud/latest/userguide/auto-downloads.html)).
+2. **Shared storage**: Direct filesystem access using remapped paths from storage profiles. No download step required.
+3. **Hybrid**: Combination based on storage configuration — shared storage files are accessed directly, job attachment files require CLI download first.
 
 ### Storage Configuration
 
@@ -193,14 +204,63 @@ class PostRenderSettings(BaseSettingsModel):
     validate_frame_completeness: bool = True
     validate_file_integrity: bool = True
 
+class HostRequirements(BaseSettingsModel):
+    """Hardware/OS requirements for Deadline Cloud worker hosts.
+    
+    Overrides the host requirements in the Deadline Cloud Submitter's
+    job settings. When set, these values are injected into the OJD
+    template's hostRequirements section, replacing the submitter defaults.
+    All fields are optional — only non-None values override the submitter.
+    """
+    os_family: str | None = None           # "linux", "windows", "macos"
+    cpu_arch: str | None = None            # "x86_64", "arm64"
+    min_vcpu: int | None = None            # Minimum vCPUs
+    max_vcpu: int | None = None            # Maximum vCPUs
+    min_memory_mib: int | None = None      # Minimum memory in MiB
+    max_memory_mib: int | None = None      # Maximum memory in MiB
+    min_gpu: int | None = None             # Minimum GPU count
+    max_gpu: int | None = None             # Maximum GPU count
+    min_gpu_memory_mib: int | None = None  # Minimum GPU memory in MiB
+    max_gpu_memory_mib: int | None = None  # Maximum GPU memory in MiB
+
+class CondaPackage(BaseSettingsModel):
+    """A single conda package specification."""
+    name: str                  # e.g., "maya", "maya-openjd", "maya-vray"
+    version: str               # Explicit version spec (e.g., "2026.*"), or "auto" to use installed version from artist machine, or "" for latest
+
+class CondaConfig(BaseSettingsModel):
+    """Conda package and channel configuration for farm workers.
+    
+    Overrides the default auto-detection behavior of the Deadline Cloud
+    DCC submitters (e.g., deadline-cloud-for-maya), allowing studios to
+    pin specific package versions from AYON server settings.
+    """
+    packages: list[CondaPackage] = []  # e.g., [{"name": "maya", "version": "2026.*"}, {"name": "maya-openjd", "version": "auto"}, {"name": "maya-vray", "version": ""}]
+    channels: list[str] = []           # Custom conda channels (overrides default channels if non-empty)
+
+class QueueConfig(BaseSettingsModel):
+    """A named Deadline Cloud queue."""
+    name: str                  # Display name
+    queue_id: str              # AWS queue ID
+    farm_id: str               # Associated farm ID
+    description: str = ""
+
 class DeadlineCloudSettings(BaseSettingsModel):
     """Root settings model for the addon."""
     farm_profiles: list[FarmProfile] = []
     default_profile: str = ""
+    available_queues: list[QueueConfig] = []   # All available queues defined at server level
+    default_queue_id: str = ""                 # Server-level default queue
+    conda_config: CondaConfig = CondaConfig()  # Conda package/channel overrides
+    host_requirements: HostRequirements = HostRequirements()  # Worker host hardware/OS overrides
     dcc_defaults: list[DCCSubmissionDefaults] = []
     post_render: PostRenderSettings = PostRenderSettings()
     custom_validations: list[CustomValidation] = []
     auto_detect_credentials: bool = True
+
+class ProjectDeadlineCloudSettings(BaseSettingsModel):
+    """Per-project overrides for Deadline Cloud settings."""
+    default_queue_id: str = ""  # Project-level override; empty = use server default
 
 class CustomValidation(BaseSettingsModel):
     """Studio-configurable validation rule."""
@@ -268,7 +328,118 @@ class SubmitterBridge:
         instances: list[CollectedRenderInstance],
         settings: DeadlineCloudSettings,
     ) -> SubmissionResult: ...
+
+    def _get_parameter_values(
+        self,
+        instance: CollectedRenderInstance,
+        settings: DeadlineCloudSettings,
+    ) -> dict[str, Any]:
+        """Build parameter values for the OJD template.
+
+        Overrides the native submitter's auto-detected conda packages
+        with AYON-configured values. Specifically, this populates the
+        `CondaPackages` and `RezPackages` shared parameter values that
+        are passed to `SubmitJobToDeadlineDialog`.
+
+        If settings.conda_config.packages is non-empty, those packages
+        replace the auto-detected values (e.g., the default
+        `conda_packages = f"maya={maya_version}.* maya-openjd={adaptor_version}.*"`
+        from deadline-cloud-for-maya).
+
+        For packages with version="auto", the installed version from the
+        artist's machine is resolved at submission time.
+        """
+        ...
+
+    def _resolve_conda_packages(
+        self,
+        conda_config: CondaConfig,
+        dcc_context: dict[str, Any],
+    ) -> str:
+        """Resolve conda package string from AYON settings.
+
+        Builds the conda package specification string by combining
+        AYON-configured packages with version resolution:
+        - Explicit versions are used as-is (e.g., "maya=2026.*")
+        - "auto" versions are resolved from the artist's installed DCC
+        - Empty versions use latest (e.g., "maya-vray")
+
+        Returns a space-separated package string compatible with the
+        Deadline Cloud submitter's CondaPackages parameter.
+        """
+        ...
+
+    def _resolve_queue_id(
+        self,
+        settings: DeadlineCloudSettings,
+        project_settings: ProjectDeadlineCloudSettings | None,
+        instance_override: str | None = None,
+    ) -> str:
+        """Resolve which queue ID to use for submission.
+
+        Priority order:
+        1. Instance-level override (if provided)
+        2. Project default queue (from project settings)
+        3. Server default queue (from server settings)
+        4. First available queue (fallback)
+        """
+        ...
+
+    def _resolve_host_requirements(
+        self,
+        host_req: HostRequirements,
+    ) -> dict[str, Any] | None:
+        """Resolve host requirements from AYON settings into OJD format.
+
+        Converts non-None fields from HostRequirements into the
+        hostRequirements dict expected by the OJD template. Only
+        fields explicitly set in AYON settings are included — unset
+        fields fall through to the submitter's defaults.
+
+        Returns None if no fields are set (submitter defaults preserved).
+        """
+        ...
 ```
+
+#### Conda Package Override Behavior
+
+The native Deadline Cloud DCC submitters (e.g., `deadline-cloud-for-maya`) auto-detect the DCC version and pull the latest compatible conda packages automatically. For example, the Maya submitter builds:
+```python
+conda_packages = f"maya={maya_version}.* maya-openjd={adaptor_version}.*"
+```
+
+The AYON integration overrides this behavior when `conda_config.packages` is configured in server settings. AYON's settings take precedence over the auto-detected values. This is an intentional design decision — studios need version pinning control for reproducibility and stability on the farm.
+
+Key override rules:
+- If `conda_config.packages` is non-empty, AYON builds the `CondaPackages` parameter value from settings instead of using auto-detection
+- The Maya version always comes from AYON server settings (not auto-detected from the artist's DCC)
+- For `maya-openjd`, the version depends on what's installed on the artist's machine when `version="auto"` is set — this allows the adaptor version to track the artist's local installation while still being explicitly controllable
+- If `conda_config.channels` is non-empty, those channels override the default conda channels
+- If `conda_config` is empty/default, the native submitter's auto-detection behavior is preserved (backward compatible)
+
+> **Integration Consideration**: This override may conflict with the native submitter's auto-detection logic. The AYON integration explicitly takes precedence. Studios should be aware that enabling conda config in AYON settings will suppress the submitter's built-in version resolution. This is documented as a known integration point that requires coordination between AYON addon updates and Deadline Cloud submitter updates.
+
+#### Queue Resolution
+
+Queue selection follows a priority chain:
+1. **Instance-level override**: Explicit queue set on a specific render instance
+2. **Project default queue**: `ProjectDeadlineCloudSettings.default_queue_id` for the current AYON project
+3. **Server default queue**: `DeadlineCloudSettings.default_queue_id`
+4. **First available queue**: Falls back to the first entry in `DeadlineCloudSettings.available_queues`
+
+This allows studios to define all available queues centrally, set a global default, and let individual projects override as needed.
+
+#### Host Requirements Override Behavior
+
+The native Deadline Cloud Submitter exposes host requirements in its job settings UI (OS family, vCPU, memory, GPU). The AYON integration allows studios to override these from server settings via `HostRequirements`.
+
+Key override rules:
+- Only non-None fields in `HostRequirements` override the submitter's values — unset fields preserve the submitter's defaults or artist's manual selections
+- This is a partial override model: studios can pin OS family and GPU requirements while leaving CPU/memory to the submitter defaults
+- Host requirements are injected into the OJD template's `hostRequirements` section before submission
+- If all fields are None (default), the submitter's host requirements are preserved entirely (backward compatible)
+
+> **Integration Consideration**: Host requirements interact with Deadline Cloud's fleet configuration. Studios should ensure that the configured requirements match available fleet capacity — e.g., requesting GPU workers when no GPU fleet is provisioned will cause jobs to remain queued indefinitely.
 
 **Responsibilities**:
 - Translate AYON render instances into Deadline Cloud Submitter parameters
@@ -331,6 +502,22 @@ Publishing is the process where a version is registered in AYON. Beyond registra
 class PostRenderProcessor:
     """Handles post-render pipeline on the farm."""
 
+    def download_outputs(
+        self, config: PostRenderConfig
+    ) -> list[str]:
+        """Download render outputs via Deadline Cloud CLI.
+
+        Required for job attachments mode — outputs are encrypted in S3
+        and can only be retrieved through the Deadline Cloud CLI
+        (e.g., `deadline job download-output`).
+
+        For shared storage mode, this is a no-op that returns the
+        expected file paths directly (files are already accessible).
+
+        Returns the local file paths of downloaded/accessible outputs.
+        """
+        ...
+
     def discover_outputs(
         self, expected_files: list[str]
     ) -> list[str]: ...
@@ -382,6 +569,9 @@ class SubmissionParams:
     job_template: str | None  # OJD template name
     job_bundle_dir: str | None  # Path to assembled OJD job bundle
     parameter_values: dict[str, Any]  # Parameter values for the OJD template
+    conda_packages: str | None  # Resolved conda package string (overrides auto-detection if set)
+    conda_channels: list[str] | None  # Custom conda channels (overrides defaults if set)
+    host_requirements: dict[str, Any] | None  # Resolved host requirements (overrides submitter defaults if set)
     storage_profile_id: str | None
     storage_config: StorageConfig | None
     max_retries: int
@@ -469,6 +659,12 @@ class StorageConfig:
     # Output retrieval settings
     output_download_method: str = "manual"  # "manual", "cron", "on_complete"
     cron_schedule: str | None = None        # e.g., "*/15 * * * *"
+    
+    # Automatic download settings (TBD — requires dedicated IAM credentials
+    # and storage profile configuration, see AWS docs: Automatic downloads)
+    auto_download_enabled: bool = False
+    auto_download_checkpoint_dir: str | None = None  # Checkpoint dir for sync-output tracking
+    auto_download_aws_profile: str | None = None     # AWS credentials profile name (e.g., "deadline-downloader")
 
 @dataclass
 class PathMapping:
@@ -528,9 +724,13 @@ def map_instance_to_params(
 
 **Postconditions:**
 - Returns a valid `SubmissionParams` with all required fields populated
-- `result.farm_id` and `result.queue_id` come from the resolved farm profile
+- `result.farm_id` and `result.queue_id` come from the resolved farm profile and queue resolution
+- `result.queue_id` follows the resolution priority: instance override > project default > server default > first available
 - `result.frame_range` is formatted as DC-compatible string (e.g., "1-100")
 - `result.post_render_config` contains all data needed for post-render publishing
+- If `settings.conda_config.packages` is non-empty, `result.conda_packages` is the resolved conda string from AYON settings (not auto-detected)
+- If `settings.conda_config.packages` is empty, `result.conda_packages` is None (native auto-detection preserved)
+- If any field in `settings.host_requirements` is non-None, `result.host_requirements` contains only those fields; otherwise `result.host_requirements` is None (submitter defaults preserved)
 - No side effects on `instance` or `settings`
 
 **Loop Invariants:** N/A
@@ -641,6 +841,19 @@ def execute_submission(publisher_context, settings):
     profile = resolve_farm_profile(settings)
     assert profile is not None, "No valid farm profile found"
 
+    # Step 1b: Resolve conda packages from AYON settings (overrides auto-detection)
+    conda_packages = resolve_conda_packages(
+        settings.conda_config,
+        dcc_context=get_dcc_context(),  # Artist's installed DCC/adaptor versions
+    )
+
+    # Step 1c: Resolve queue ID (instance override > project > server > first available)
+    project_settings = get_project_settings(publisher_context.project_name)
+    queue_id = resolve_queue_id(settings, project_settings)
+
+    # Step 1d: Resolve host requirements from AYON settings
+    host_requirements = resolve_host_requirements(settings.host_requirements)
+
     # Step 2: Collect all render instances from publisher context
     instances = [
         inst for inst in publisher_context.instances
@@ -653,6 +866,15 @@ def execute_submission(publisher_context, settings):
     for instance in instances:
         params = map_instance_to_params(instance, settings, profile)
         assert params.farm_id != "" and params.queue_id != ""
+        # Override queue_id with resolved value
+        params.queue_id = queue_id
+        # Apply conda package override if configured
+        if conda_packages:
+            params.conda_packages = conda_packages
+            params.conda_channels = settings.conda_config.channels or None
+        # Apply host requirements override if configured
+        if host_requirements:
+            params.host_requirements = host_requirements
         all_params.append((instance, params))
 
     # Step 4: Pre-populate and invoke Deadline Cloud Submitter
@@ -695,10 +917,22 @@ def execute_post_render(config: PostRenderConfig, settings: PostRenderSettings):
     Runs as a Deadline Cloud job after rendering completes.
     """
 
-    # Step 1: Discover rendered output files
-    discovered = discover_output_files(config.expected_files)
+    # Step 1: Download render outputs (mandatory for job attachments mode)
+    # In job attachments mode, outputs are encrypted in S3 and must be
+    # retrieved via the Deadline Cloud CLI before any processing.
+    # In shared storage mode, this is a no-op (files already accessible).
+    if config.storage_config.storage_mode in ("job_attachments", "hybrid"):
+        local_paths = download_outputs_via_cli(config)
+        # Uses: deadline job download-output
+        assert len(local_paths) > 0, "No outputs downloaded from Deadline Cloud"
+    else:
+        # Shared storage: files are directly accessible via remapped paths
+        local_paths = config.expected_files
 
-    # Step 2: Validate outputs
+    # Step 2: Discover rendered output files
+    discovered = discover_output_files(local_paths)
+
+    # Step 3: Validate outputs
     validation = validate_outputs(discovered, config.expected_files)
 
     if not validation.is_valid:
@@ -708,12 +942,12 @@ def execute_post_render(config: PostRenderConfig, settings: PostRenderSettings):
         )
         return False
 
-    # Step 3: Move files to final destinations via path templates
+    # Step 4: Move files to final destinations via path templates
     final_files = move_to_final_destination(
         discovered, config.anatomy_templates
     )
 
-    # Step 4: Transcode if configured
+    # Step 5: Transcode if configured
     all_files = list(final_files)
     for profile in config.transcode_profiles:
         matching = [f for f in final_files if f.endswith(profile.input_extension)]
@@ -721,17 +955,17 @@ def execute_post_render(config: PostRenderConfig, settings: PostRenderSettings):
             transcoded = transcode_files(matching, profile)
             all_files.extend(transcoded)
 
-    # Step 5: Apply burnins to review media if configured
+    # Step 6: Apply burnins to review media if configured
     if settings.burnin_config.enabled:
         review_files = [f for f in all_files if is_review_format(f)]
         if review_files:
             burnin_files = apply_burnins(review_files, settings.burnin_config)
             all_files.extend(burnin_files)
 
-    # Step 6: Build representations
+    # Step 7: Build representations
     representations = build_representations(all_files, config.representations)
 
-    # Step 7: Register version in AYON
+    # Step 8: Register version in AYON
     metadata = {
         "project": config.ayon_project,
         "folder_path": config.ayon_folder_path,
@@ -774,6 +1008,76 @@ def resolve_farm_profile(
     return settings.farm_profiles[0]
 ```
 
+### Queue Resolution Algorithm
+
+```python
+def resolve_queue_id(
+    settings: DeadlineCloudSettings,
+    project_settings: ProjectDeadlineCloudSettings | None = None,
+    instance_override: str | None = None,
+) -> str:
+    """
+    ALGORITHM: Resolve which queue ID to use for submission.
+    INPUT: settings (server settings), project_settings (per-project overrides), instance_override (optional)
+    OUTPUT: queue_id (str)
+
+    Priority: instance override > project default > server default > first available queue
+    """
+
+    # 1. Instance-level override takes highest priority
+    if instance_override:
+        return instance_override
+
+    # 2. Project-level default queue
+    if project_settings and project_settings.default_queue_id:
+        return project_settings.default_queue_id
+
+    # 3. Server-level default queue
+    if settings.default_queue_id:
+        return settings.default_queue_id
+
+    # 4. Fall back to first available queue
+    assert len(settings.available_queues) > 0, "No queues configured"
+    return settings.available_queues[0].queue_id
+```
+
+### Conda Package Resolution Algorithm
+
+```python
+def resolve_conda_packages(
+    conda_config: CondaConfig,
+    dcc_context: dict[str, Any],
+) -> str:
+    """
+    ALGORITHM: Resolve conda package string from AYON settings.
+    INPUT: conda_config (from server settings), dcc_context (artist's DCC environment info)
+    OUTPUT: conda_packages_str (space-separated package spec string)
+
+    If conda_config.packages is empty, returns empty string (native submitter
+    auto-detection is preserved). Otherwise, builds the package string from
+    AYON settings, overriding the submitter's auto-detected values.
+    """
+
+    if not conda_config.packages:
+        return ""  # No override — let native submitter auto-detect
+
+    parts = []
+    for pkg in conda_config.packages:
+        if pkg.version == "auto":
+            # Resolve version from artist's installed DCC/adaptor
+            installed_version = dcc_context.get(f"{pkg.name}_version", "")
+            if installed_version:
+                parts.append(f"{pkg.name}={installed_version}.*")
+            else:
+                parts.append(pkg.name)  # Fall back to latest if not detected
+        elif pkg.version:
+            parts.append(f"{pkg.name}={pkg.version}")
+        else:
+            parts.append(pkg.name)  # Empty version = latest
+
+    return " ".join(parts)
+```
+
 ## Example Usage
 
 ```python
@@ -796,6 +1100,29 @@ settings = DeadlineCloudSettings(
         ),
     ],
     default_profile="production",
+    available_queues=[
+        QueueConfig(
+            name="Main Render Queue",
+            queue_id="queue-xyz789",
+            farm_id="farm-abc123",
+            description="Primary production render queue",
+        ),
+        QueueConfig(
+            name="Previs Queue",
+            queue_id="queue-previs",
+            farm_id="farm-abc123",
+            description="Lower priority previs renders",
+        ),
+    ],
+    default_queue_id="queue-xyz789",
+    conda_config=CondaConfig(
+        packages=[
+            CondaPackage(name="maya", version="2026.*"),
+            CondaPackage(name="maya-openjd", version="auto"),  # Use artist's installed version
+            CondaPackage(name="maya-vray", version=""),         # Latest available
+        ],
+        channels=["my-studio-conda-channel"],
+    ),
     dcc_defaults=[
         DCCSubmissionDefaults(
             dcc_name="maya",
@@ -830,11 +1157,46 @@ else:
 
 # Example 3: Post-render script execution (on farm worker)
 processor = PostRenderProcessor()
-outputs = processor.discover_outputs(config.expected_files)
+
+# Step 0: Download outputs first (required for job attachments mode)
+local_files = processor.download_outputs(config)
+
+# Then proceed with discovery, validation, and publishing
+outputs = processor.discover_outputs(local_files)
 validation = processor.validate_outputs(outputs, config.expected_files)
 if validation.is_valid:
     processor.transcode(outputs, transcode_profile)
     version_id = processor.register_version(outputs, metadata)
+
+# Example 4: Per-project queue override
+project_settings = ProjectDeadlineCloudSettings(
+    default_queue_id="queue-previs",  # This project uses the previs queue
+)
+queue_id = resolve_queue_id(
+    settings=server_settings,
+    project_settings=project_settings,
+)
+# Returns "queue-previs" (project override takes precedence over server default)
+
+# Example 5: Conda package resolution
+conda_str = resolve_conda_packages(
+    conda_config=settings.conda_config,
+    dcc_context={"maya-openjd_version": "0.15"},
+)
+# Returns: "maya=2026.* maya-openjd=0.15.* maya-vray"
+
+# Example 6: Host requirements override (GPU renders need GPU workers)
+settings_with_gpu = DeadlineCloudSettings(
+    # ...other settings...
+    host_requirements=HostRequirements(
+        os_family="linux",
+        min_gpu=1,
+        min_gpu_memory_mib=8192,  # 8 GB GPU memory minimum
+    ),
+)
+# Only os_family, min_gpu, and min_gpu_memory_mib are injected into the OJD template.
+# All other host requirement fields (vcpu, memory, max_gpu, etc.) fall through
+# to the Deadline Cloud Submitter's defaults.
 ```
 
 ## Correctness Properties
@@ -854,6 +1216,14 @@ The following properties must hold for the integration to be correct:
 6. **Version Registration Idempotency**: Registering the same version with the same files and metadata multiple times produces exactly one version in AYON (handles retries gracefully).
 
 7. **Profile Resolution Determinism**: For the same settings and override inputs, `resolve_farm_profile` always returns the same profile. The resolution order is deterministic: explicit override > default > first.
+
+8. **Conda Override Precedence**: When `conda_config.packages` is non-empty in AYON settings, the resolved `CondaPackages` parameter value must match the AYON-configured packages, not the native submitter's auto-detected values. Formally: `∀s: s.conda_config.packages ≠ [] ⟹ submission.conda_packages == resolve_conda_packages(s.conda_config)`.
+
+9. **Queue Resolution Determinism**: For the same settings, project settings, and instance override, `resolve_queue_id` always returns the same queue ID. The resolution order is deterministic: instance override > project default > server default > first available.
+
+10. **Output Download Precondition**: For job attachments mode, post-render processing must not begin validation or file operations until outputs have been successfully downloaded via the Deadline Cloud CLI. Formally: `∀j: j.storage_mode == "job_attachments" ⟹ download_complete(j) before discover_outputs(j)`.
+
+11. **Host Requirements Override Precedence**: When any field in `host_requirements` is non-None in AYON settings, the corresponding field in the OJD template's hostRequirements must match the AYON-configured value. Unset fields must not be injected (submitter defaults preserved). Formally: `∀f ∈ HostRequirements.fields: f is not None ⟹ ojd.hostRequirements[f] == settings.host_requirements[f]`.
 
 ## Error Handling
 
