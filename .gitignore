@@ -165,3 +165,7 @@ Temporary Items
 # poetry and uv locks
 poetry.lock
 uv.lock
+
+# Kiro personal settings
+.kiro/settings/
+.kiro/steering/
