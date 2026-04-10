@@ -1,9 +1,11 @@
 """Collect AWS Deadline Cloud Job Data."""
 from __future__ import annotations
 
+import dataclasses
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import pyblish.api
+from deadline import client
 from deadline.client.job_bundle.submission import AssetReferences
 from deadline.maya_submitter.data_classes import RenderSubmitterUISettings
 from deadline.maya_submitter.maya_render_submitter import (
@@ -47,8 +49,27 @@ class CollectDeadlineCloudJobData(pyblish.api.ContextPlugin):
         # this would be 'job_bundle/asset_references.yaml'
         asset_refs_dict = get_asset_references_for_submission(asset_references)
 
+        self.log.info(
+            "Collected job data for AWS Deadline Cloud: ")
         context.data["deadline_cloud_job_data"] = {
             "job_template": job_template,
             "parameter_values": parameter_values,
             "asset_references": asset_refs_dict,
         }
+        self.log.info(
+            "Collected job data for AWS Deadline Cloud.")
+
+        profile_name = client.config.get_setting("defaults.aws_profile_name")
+        default_farm_id = client.config.get_setting("defaults.farm_id")
+        queue_id = client.config.get_setting("defaults.queue_id")
+        queue_parameters: list[dict[str, Any]] = get_queue_parameters()
+
+        context.data["deadline_cloud_submitter_settings"] = {
+            "profile_name": profile_name,
+            "default_farm_id": default_farm_id,
+            "queue_id": queue_id,
+            "queue_parameters": queue_parameters,
+            "render_settings": dataclasses.asdict(settings),
+        }
+        self.log.info(
+            "Collected submitter settings for AWS Deadline Cloud.")
