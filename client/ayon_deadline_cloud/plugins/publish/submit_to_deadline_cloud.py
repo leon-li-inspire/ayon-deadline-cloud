@@ -6,20 +6,24 @@ from typing import TYPE_CHECKING, ClassVar
 
 import pyblish.api
 from deadline.client.api import create_job_from_job_bundle
-from deadline.client.job_bundle._yaml import deadline_yaml_dump
+from deadline.client.job_bundle._yaml import (
+    deadline_yaml_dump,  # noqa: PLC2701
+)
 
 if TYPE_CHECKING:
     from logging import Logger
 
 
-class SubmitToDeadlineCloud(pyblish.api.ContextPlugin):
+class SubmitToDeadlineCloud(pyblish.api.InstancePlugin):
+    """Submit job to AWS Deadline Cloud."""
     """Create job bundle and submit to AWS Deadline Cloud."""
     label = "Submit to AWS Deadline Cloud"
     order = pyblish.api.IntegratorOrder + 0.1
     targets: ClassVar[list[str]] = ["local"]
+    families: ClassVar[list[str]] = ["deadline_cloud"]
     log: Logger
 
-    def process(self, context: pyblish.api.Context) -> None:
+    def process(self, instance: pyblish.api.Instance) -> None:
         """Create job bundle and submit to AWS Deadline Cloud.
 
         Craete temporary directory, dump collected job data
@@ -27,15 +31,15 @@ class SubmitToDeadlineCloud(pyblish.api.ContextPlugin):
         to it as YAML files and submit the job bundle to AWS Deadline Cloud.
 
         Args:
-            context: Pyblish context with collected job data.
+            instance: Pyblish instance with collected job data in context.
 
         """
-        if not context.data.get("deadline_cloud_job_data"):
+        if not instance.context.data.get("deadline_cloud_job_data"):
             self.log.warning(
                 "No job data collected for AWS Deadline Cloud. "
                 "Skipping submission.")
             return
-        job_data = context.data["deadline_cloud_job_data"]
+        job_data = instance.context.data["deadline_cloud_job_data"]
         self.log.info(
             "Creating job bundle and submitting to AWS Deadline Cloud...")
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -66,4 +70,4 @@ class SubmitToDeadlineCloud(pyblish.api.ContextPlugin):
             self.log.info("Submitting job bundle to AWS Deadline Cloud...")
             job_id = create_job_from_job_bundle(temp_dir)
             self.log.info(
-                f"Job submitted to AWS Deadline Cloud with ID: {job_id}") 
+                f"Job submitted to AWS Deadline Cloud with ID: {job_id}")

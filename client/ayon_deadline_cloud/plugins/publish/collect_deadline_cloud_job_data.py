@@ -24,6 +24,7 @@ class CollectDeadlineCloudJobData(pyblish.api.ContextPlugin):
     label = "Collect AWS Deadline Cloud Job Data"
     order = pyblish.api.CollectorOrder + 0.1
     targets: ClassVar[list[str]] = ["local"]
+    families: ClassVar[list[str]] = ["deadline_cloud"]
     log: Logger
 
     def process(self, context: pyblish.api.Context) -> None:
