@@ -12,7 +12,7 @@ class CollectDeadlineCloudInstances(pyblish.api.ContextPlugin):
     order = pyblish.api.CollectorOrder + 0.1
     targets: ClassVar[list[str]] = ["local"]
 
-    def process(self, context: pyblish.api.Context) -> None:
+    def process(self, context: pyblish.api.Context) -> None:  # noqa: PLR6301
         """Collect instances to be submitted to AWS Deadline Cloud.
 
         Find all instances with `instance.data["farm"]`

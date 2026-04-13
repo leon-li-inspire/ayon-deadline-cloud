@@ -16,7 +16,6 @@ class DeadlineCloudAddon(AYONAddon, IPluginPaths):
     name = "deadline_cloud"
     version = __version__
 
-
     @staticmethod
     def add_implementation_envs(
         env: dict[str, str], _app: Any) -> None:  # noqa: ANN401
@@ -36,7 +35,7 @@ class DeadlineCloudAddon(AYONAddon, IPluginPaths):
     @staticmethod
     def get_publish_plugin_paths(
          host_name: Optional[str] = None  # noqa: ARG004
-    ) -> list[str]:
+    ) -> list[str]:  # ty:ignore[invalid-method-override]
         """Return list of paths to publish plugins.
 
         Args:
@@ -52,8 +51,8 @@ class DeadlineCloudAddon(AYONAddon, IPluginPaths):
 
     @staticmethod
     def get_create_plugin_paths(
-         host_name: Optional[str] = None  # noqa: ARG004
-    ) -> list[str]:
+         host_name: Optional[str] = None
+    ) -> list[str]:  # ty:ignore[invalid-method-override]
         """Return list of paths to creator plugins.
 
         Args:

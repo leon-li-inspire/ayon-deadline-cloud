@@ -1,3 +1,4 @@
+"""Addon manifest."""
 # Required: lower case addon name e.g. 'deadline', otherwise addon
 #   will be invalid
 name = "deadline_cloud"

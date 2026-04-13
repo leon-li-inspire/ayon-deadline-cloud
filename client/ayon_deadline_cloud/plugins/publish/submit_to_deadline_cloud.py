@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, ClassVar
 
 import pyblish.api
 from deadline.client.api import create_job_from_job_bundle
-from deadline.client.job_bundle._yaml import (
-    deadline_yaml_dump,  # noqa: PLC2701
+from deadline.client.job_bundle._yaml import (  # noqa: PLC2701
+    deadline_yaml_dump,
 )
 
 if TYPE_CHECKING:
@@ -70,4 +70,5 @@ class SubmitToDeadlineCloud(pyblish.api.InstancePlugin):
             self.log.info("Submitting job bundle to AWS Deadline Cloud...")
             job_id = create_job_from_job_bundle(temp_dir)
             self.log.info(
-                f"Job submitted to AWS Deadline Cloud with ID: {job_id}")
+                "Job submitted to AWS Deadline Cloud with ID: %s",
+                job_id)
