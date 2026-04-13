@@ -14,10 +14,11 @@ The key architectural principle is **separation of responsibilities**: AYON owns
 
 - **Studio-configurable validations**: Pre-submission validation plugins that run before any resource-intensive operations. Includes both built-in technical validations (renderable camera exists, valid frame range) and studio-defined custom validations (required AOVs, render settings checks).
 - **Publishing and processing results**: Version registration in AYON, transcoding, reviewable creation, burnins, file movement/renaming via path templates.
-- **Basic job dependencies**: Render → Post-render (publish) dependency chain within a single job using OJD step dependencies.
+- **Post-render publishing on-prem**: Rendered outputs are downloaded to the studio (via auto-download cron or AYON service), and the publish pipeline runs locally on a dedicated machine with filesystem access.
 
 ### Deferred (Post-MVP)
 
+- **Farm-side post-render**: Running the publish pipeline on Deadline Cloud workers as OpenJD template steps. Requires a lightweight headless publish runner (without full AYON launcher/Qt dependencies) and fileshare access from workers. See [Post-Render Execution Model](#post-render-execution-model) for the full trade-off analysis.
 - **Advanced project tracking**: Higher-level job dependencies beyond render→publish, priority management across assets, planning integration, task status updates.
 - **Asset-level dependencies**: Complex dependency graphs like "create render archives → render images → publish".
 - **Cross-job orchestration**: Managing priorities and dependencies across multiple submissions.
@@ -45,15 +46,14 @@ graph TD
     subgraph "AWS Deadline Cloud"
         D --> H[Deadline Cloud Submitter Tool]
         H -->|OJD Job Bundle| I[Deadline Cloud API]
-        I --> J[Render Step]
-        J --> K[Post-Render Step]
+        I --> J[Render Job]
     end
 
-    subgraph "Post-Render Pipeline"
-        K --> L[AYON Post-Render Script]
-        L --> M[Output Validation]
-        M --> N[Transcoding / Burnins]
-        N --> O[Version Registration in AYON]
+    subgraph "On-Prem Post-Render Pipeline (MVP)"
+        P1[Auto-Download / AYON Service] --> P2[Output Discovery & Validation]
+        P2 --> P3[File Movement / Renaming]
+        P3 --> P4[Transcoding / Burnins]
+        P4 --> P5[Version Registration in AYON]
     end
 
     A -.->|fetch settings| E
@@ -62,12 +62,14 @@ graph TD
     J -->|read inputs| S2
     J -->|write outputs| S1
     J -->|write outputs| S2
-    L -->|access outputs| S1
-    L -->|access outputs| S2
-    L -.->|register versions| E
+    S1 -->|download outputs| P1
+    S2 -->|access outputs| P1
+    P5 -.->|register versions| E
 ```
 
-> **Note on job structure**: Deadline Cloud models render and post-render as *steps within a single job*, not as separate jobs. Step dependencies (`dependencies: [dependsOn: RenderStep]`) ensure the post-render step only runs after the render step completes. This is the native Deadline Cloud pattern — the submitter creates a single OJD job template with multiple steps. The post-render step can access the render step's outputs via step-level job attachment syncing. See [Step dependencies](https://docs.aws.amazon.com/deadline-cloud/latest/developerguide/build-jobs-scheduling.html), [Using files from a step in a dependent step](https://docs.aws.amazon.com/deadline-cloud/latest/developerguide/using-files-output-from-a-step-in-a-dependent-step.html), and [OJD StepTemplate schema](https://github.com/OpenJobDescription/openjd-specifications/wiki/2023-09-Template-Schemas).
+> **Note on MVP job structure**: For MVP, Deadline Cloud handles rendering only. The job submitted is a render-only job — there is no post-render step within the Deadline Cloud job. Post-render publishing runs on-prem, triggered by output availability (via auto-download cron or AYON service). This keeps the Deadline Cloud integration focused on rendering while AYON handles the full publish pipeline locally.
+>
+> **Target state (post-MVP)**: Post-render steps defined as [OpenJD templates](https://github.com/OpenJobDescription/openjd-specifications/wiki/2023-09-Template-Schemas) that can run either as dependent steps within the Deadline Cloud job (on farm workers) or on-prem via the [OpenJD runtime](https://github.com/OpenJobDescription/openjd-sessions). This gives customers the choice based on their infrastructure (cloud-native vs on-prem vs hybrid). See [Post-Render Execution Model](#post-render-execution-model) for details.
 
 ## Sequence Diagrams
 
@@ -98,7 +100,7 @@ sequenceDiagram
         Publisher->>Bridge: Submit via Deadline Cloud
         Bridge->>Bridge: Map AYON instances to Submitter params
         Bridge->>Submitter: Pre-populate settings & invoke submission
-        Submitter->>DC: CreateJob (single job with render + post-render steps)
+        Submitter->>DC: CreateJob (render-only job)
         DC-->>Submitter: job_id
         Submitter-->>Bridge: Submission result (job ID, step IDs)
         Bridge-->>Publisher: Submission complete
@@ -106,36 +108,31 @@ sequenceDiagram
     end
 ```
 
-### Post-Render Publishing Flow
+### Post-Render Publishing Flow (MVP — On-Prem)
 
 ```mermaid
 sequenceDiagram
     participant DC as Deadline Cloud
-    participant Script as Post-Render Script
-    participant CLI as Deadline Cloud CLI
+    participant DL as Auto-Download / AYON Service
+    participant Script as Post-Render Script (On-Prem)
     participant AYON as AYON Server API
 
-    DC->>Script: Trigger post-render step (render step complete)
+    DC->>DC: Render job completes
+    DL->>DC: Download outputs (deadline queue sync-output / manual)
+    DC-->>DL: Rendered output files
 
-    alt Job Attachments Mode
-        Script->>CLI: deadline job download-output
-        CLI-->>Script: Downloaded output files to local path
-    else Shared Storage Mode
-        Script->>Script: Access outputs directly via remapped paths
-    end
-
+    DL->>Script: Trigger publish pipeline (outputs available locally)
     Script->>Script: Discover rendered output files
     Script->>Script: Validate outputs (frame completeness, file integrity)
 
     alt Validation Failed
-        Script->>DC: Report failure
+        Script->>Script: Report failure
     else Validation Passed
         Script->>Script: Move/rename files via path templates
         Script->>Script: Run transcoding (if configured)
         Script->>Script: Apply burnins (if configured)
         Script->>AYON: Register version (files, metadata)
         AYON-->>Script: Version registered
-        Script->>DC: Report success
     end
 ```
 
@@ -498,10 +495,33 @@ class ValidateRenderSettings:
 
 ### Component 5: Post-Render Script (`client/scripts/post_render.py`)
 
-> **TBD — Execution Model**: It is to be discussed whether the post-render processing should run as a dependent step within the Deadline Cloud job (on a farm worker) or be executed locally within the AYON pipeline (on the artist's workstation or a dedicated processing machine). Key trade-offs:
-> - **Farm step**: Runs close to rendered data (especially with job attachments), scales with farm capacity, but requires AYON server access from farm workers and complicates credential management.
-> - **Local AYON pipeline**: Keeps all AYON logic local, simpler credential handling, but requires downloading all rendered outputs first and doesn't leverage farm compute for transcoding/burnins.
-> This decision affects the architecture of the post-render pipeline and how outputs are accessed. The current design documents both paths.
+#### Post-Render Execution Model
+
+**MVP: On-prem post-render.** Rendered outputs are downloaded to the studio via auto-download (`deadline queue sync-output` as a cron job) or an AYON service. The publish pipeline runs locally on a dedicated machine with access to the studio filesystem. This is the simplest path — it avoids cloud packaging, worker-to-AYON connectivity, and fileshare access complexity.
+
+**Target state (post-MVP): Farm-side post-render via OpenJD templates.** Post-render steps are defined as OpenJD templates that can run as dependent steps on Deadline Cloud workers or on-prem via the OpenJD runtime (`openjd-sessions`). This gives customers the choice based on their infrastructure. The same templates work in both environments — the "where does it run?" question becomes a deployment choice per customer, not a development decision.
+
+**Trade-offs:**
+
+| | On-prem (MVP) | On-farm (post-MVP) |
+|---|---|---|
+| Compute | Dedicated studio machine | Farm workers (scales with farm) |
+| Fileshare access | Direct (local filesystem) | Depends on fleet type (see below) |
+| AYON dependencies | Already available locally | Must be packaged (conda, host config, AMI) |
+| Latency | Download first, then process | Processing starts after render |
+| Setup complexity | AYON service + auto-download | OpenJD templates + dependency packaging |
+
+**Fileshare access by fleet type (relevant for farm-side post-render):**
+- **CMF on-prem**: Workers already on studio network, direct access
+- **CMF on EC2**: Workers in customer VPC, reach on-prem via VPN/Direct Connect
+- **SMF**: Workers can access customer VPC resources (NFS, fileshares) via [VPC Lattice resource endpoints](https://docs.aws.amazon.com/deadline-cloud/latest/developerguide/smf-vpc.html)
+- **Cloud-native storage**: A synchronized fileshare available in the cloud (e.g., FSx) works directly
+
+**Prerequisites for farm-side post-render:**
+- OpenJD templates defining the post-render steps
+- A lightweight headless publish runner (subset of ayon-core, without full launcher/Qt dependencies)
+- AYON dependencies available on workers (via conda packages, host configuration scripts, or pre-baked AMIs)
+- Network connectivity from workers to the AYON server API
 
 **Purpose**: Handles output validation, transcoding, burnin application, and version registration in AYON after rendering completes. May run as a Deadline Cloud dependent step (on farm) or locally within the AYON pipeline (see TBD above).
 
@@ -634,9 +654,7 @@ class PostRenderConfig:
 class SubmissionResult:
     """Result returned after submitting to Deadline Cloud."""
     success: bool
-    job_id: str | None                     # Single job containing both render and post-render steps
-    render_step_id: str | None = None
-    post_render_step_id: str | None = None
+    job_id: str | None                     # Render job ID
     error_message: str | None = None
     submitted_instances: list[str] = field(default_factory=list)
 ```
