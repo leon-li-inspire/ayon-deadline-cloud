@@ -27,7 +27,7 @@ exclude = [
     "site-packages",
     "venv",
     "package.py",
-    "mkdocs_hooks.py".
+    "mkdocs_hooks.py",
 ]
 
 # Same as Black.
