@@ -66,7 +66,7 @@ class HostCondaPackages:
         packages.extend(
             (
                 f"maya={maya_version}.*",
-                f" aya-openjd={adaptor_version}.*",
+                f"maya-openjd={adaptor_version}",
             ))
 
         # handle maya renderers
