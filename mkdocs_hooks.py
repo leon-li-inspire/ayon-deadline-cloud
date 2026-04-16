@@ -1,17 +1,23 @@
+"""Hooks for mkdocs."""
+from __future__ import annotations
+
+import glob
+import json
+import logging
 import os
 from pathlib import Path
 from shutil import rmtree
-import json
-import glob
-import logging
+from typing import TYPE_CHECKING, ClassVar
+
+if TYPE_CHECKING:
+    from logging import LogRecord
 
 TMP_FILE = "./missing_init_files.json"
 NFILES = []
 
-# -----------------------------------------------------------------------------
-
 
 class ColorFormatter(logging.Formatter):
+    """Format logging messages using colors."""
     grey = "\x1b[38;20m"
     green = "\x1b[32;20m"
     yellow = "\x1b[33;20m"
@@ -19,11 +25,11 @@ class ColorFormatter(logging.Formatter):
     bold_red = "\x1b[31;1m"
     reset = "\x1b[0m"
     fmt = (
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s "  # noqa
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s "
         "(%(filename)s:%(lineno)d)"
     )
 
-    FORMATS = {
+    FORMATS: ClassVar[dict[int, str]] = {
         logging.DEBUG: grey + fmt + reset,
         logging.INFO: green + fmt + reset,
         logging.WARNING: yellow + fmt + reset,
@@ -31,7 +37,16 @@ class ColorFormatter(logging.Formatter):
         logging.CRITICAL: bold_red + fmt + reset,
     }
 
-    def format(self, record):
+    def format(self, record: LogRecord) -> str:
+        """Format logging messages using colors.
+
+        Args:
+            record: LogRecord to format.
+
+        Returns:
+            Returns the resulting string.
+
+        """
         log_fmt = self.FORMATS.get(record.levelno)
         formatter = logging.Formatter(log_fmt)
         return formatter.format(record)
@@ -45,19 +60,33 @@ logging.basicConfig(
     handlers=[ch],
 )
 
+log = logging.getLogger("mkdocs")
 
-# -----------------------------------------------------------------------------
 
+def create_init_file(dirpath: str, msg: str) -> None:
+    """Create an __init__ file in the given directory.
 
-def create_init_file(dirpath, msg):
-    global NFILES
+    Args:
+        dirpath: The directory to create the __init__ file.
+        msg: An optional message to display during the removal process.
+
+    """
+    global NFILES  # noqa: PLW0602
     ini_file = f"{dirpath}/__init__.py"
     Path(ini_file).touch()
     NFILES.append(ini_file)
-    logging.info(f"{msg}: created '{ini_file}'")
+    log.info("%s: created '%s'", msg, ini_file)
 
 
-def create_parent_init_files(dirpath: str, rootpath: str, msg: str):
+def create_parent_init_files(dirpath: str, rootpath: str, msg: str) -> None:
+    """Create an __init__ file in the given directory.
+
+    Args:
+        dirpath: The directory to create the __init__ file.
+        rootpath: The directory to create the __init__ file.
+        msg: An optional message to display during the removal process.
+
+    """
     parent_path = dirpath
     while parent_path != rootpath:
         parent_path = os.path.dirname(parent_path)
@@ -68,19 +97,18 @@ def create_parent_init_files(dirpath: str, rootpath: str, msg: str):
             break
 
 
-def add_missing_init_files(*roots, msg=""):
-    """
+def add_missing_init_files(*roots: str, msg: str = "") -> None:
+    """Add missing __init__ files.
+
     This function takes in one or more root directories as arguments and scans
     them for Python files without an `__init__.py` file. It generates a JSON
     file named `missing_init_files.json` containing the paths of these files.
 
     Args:
         *roots: Variable number of root directories to scan.
+        msg: An optional message to display during the removal process.
 
-    Returns:
-        None
     """
-
     for root in roots:
         if not os.path.exists(root):
             continue
@@ -98,66 +126,64 @@ def add_missing_init_files(*roots, msg=""):
             create_init_file(dirpath, msg)
             create_parent_init_files(dirpath, rootpath, msg)
 
-    with open(TMP_FILE, "w") as f:
+    with open(TMP_FILE, "w", encoding="utf8") as f:
         json.dump(NFILES, f)
 
 
-def remove_missing_init_files(msg=""):
-    """
+def remove_missing_init_files(msg: str = "") -> None:
+    """Removes missing `__init__.py`  files.
+
     This function removes temporary `__init__.py` files created in the
     `add_missing_init_files()` function. It reads the paths of these files from
     a JSON file named `missing_init_files.json`.
 
     Args:
-        None
+        msg: An optional message to display during the removal process.
 
-    Returns:
-        None
     """
-    global NFILES
+    global NFILES  # noqa: PLW0603
     nfiles = []
     if os.path.exists(TMP_FILE):
-        with open(TMP_FILE, "r") as f:
+        with open(TMP_FILE, encoding="utf8") as f:
             nfiles = json.load(f)
     else:
         nfiles = NFILES
 
     for file in nfiles:
         Path(file).unlink()
-        logging.info(f"{msg}: removed {file}")
+        log.info("%s: removed %s", msg, file)
 
     os.remove(TMP_FILE)
     NFILES = []
 
 
-def remove_pychache_dirs(msg=""):
-    """
+def remove_pychache_dirs(msg: str = "") -> None:
+    """Remove pycache dirs.
+
     This function walks the current directory and removes all existing
     '__pycache__' directories.
 
     Args:
         msg: An optional message to display during the removal process.
 
-    Returns:
-        None
     """
     nremoved = 0
 
-    for dirpath, dirs, files in os.walk("."):
+    for dirpath, dirs, _ in os.walk("."):
         if "__pycache__" in dirs:
             pydir = Path(f"{dirpath}/__pycache__")
             rmtree(pydir)
             nremoved += 1
-            logging.info(f"{msg}: removed '{pydir}'")
+            log.info("%s: removed '%s'", msg, pydir)
 
     if not nremoved:
-        logging.info(f"{msg}: no __pycache__ dirs found")
+        log.info("%s: no __pycache__ dirs found", msg)
 
 
 # mkdocs hooks ----------------------------------------------------------------
 
-
-def on_startup(command, dirty):
+def on_startup(command: str, dirty: bool) -> None
+    """Startup hook for mkdocs."""
     remove_pychache_dirs(msg="HOOK    -  on_startup")
 
 

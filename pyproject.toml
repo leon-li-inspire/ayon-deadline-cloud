@@ -14,11 +14,22 @@ requires-python = ">=3.11.9"
 dependencies = [
     "pre-commit",
     "ruff ~= 0.15.0",
-    "ty"
+    "ty",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
     "codespell",
+    "pyblish-base>=1.8.12",
+]
+
+[tool.ty.environment]
+extra-paths = [
+    "../ayon-core/client",
+    "../ayon-maya/client",
+    "../deadline-cloud-for-maya/plugin_env/scripts",
+    "../ayon-core/.venv/Lib/site-packages",
+    "../ayon-docker/backend",
+    "client"
 ]

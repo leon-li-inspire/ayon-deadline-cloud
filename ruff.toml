@@ -27,6 +27,7 @@ exclude = [
     "site-packages",
     "venv",
     "package.py",
+    "mkdocs_hooks.py".
 ]
 
 # Same as Black.
@@ -41,7 +42,6 @@ pydocstyle.convention = "google"
 select = ["ALL"]
 ignore = [
     "PTH",
-    "ANN101",  # missing-type-function-argument: for older ruff version
     "ANN204",  # missing-return-type-special-method
     "COM812",  # missing-trailing-comma
     "S603",    # subprocess-without-shell-equals-true
