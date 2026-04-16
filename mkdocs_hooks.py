@@ -182,7 +182,7 @@ def remove_pychache_dirs(msg: str = "") -> None:
 
 # mkdocs hooks ----------------------------------------------------------------
 
-def on_startup(command: str, dirty: bool) -> None
+def on_startup(command: str, dirty: bool) -> None:
     """Startup hook for mkdocs."""
     remove_pychache_dirs(msg="HOOK    -  on_startup")
 

@@ -112,7 +112,9 @@ class CollectDeadlineCloudJobData(
                 settings, dc_settings, queue_parameters)
         )
         self.log.info(
-            "Collected submitter settings for AWS Deadline Cloud to the context")
+                "Collected submitter settings for "
+                "AWS Deadline Cloud to the context."
+            )
 
     @staticmethod
     def _build_job_template(
@@ -150,7 +152,8 @@ class CollectDeadlineCloudJobData(
         Args:
             instance_attrs: Creator attributes from the instance.
             template_param_names: Set of parameter names from the job template.
-            pv_by_name: Mutable parameter-value mapping keyed by parameter name.
+            pv_by_name: Mutable parameter-value mapping keyed by
+                parameter name.
 
         """
         for attr_name, attr_value in instance_attrs.items():
@@ -184,7 +187,8 @@ class CollectDeadlineCloudJobData(
         Args:
             dc_settings: Deadline Cloud AYON settings dict.
             template_param_names: Set of parameter names from the job template.
-            pv_by_name: Mutable parameter-value mapping keyed by parameter name.
+            pv_by_name: Mutable parameter-value mapping
+                keyed by parameter name.
 
         """
         overrides = [
@@ -214,10 +218,14 @@ class CollectDeadlineCloudJobData(
 
         Args:
             job_template: Job template dict (passed to auto-detection).
-            pv_by_name: Mutable parameter-value mapping keyed by parameter name.
+            pv_by_name: Mutable parameter-value mapping
+                keyed by parameter name.
 
         """
-        if "CondaPackages" not in pv_by_name or pv_by_name["CondaPackages"]["value"]:
+        if (
+                "CondaPackages" not in pv_by_name
+                or pv_by_name["CondaPackages"]["value"]
+        ):
             return
         auto_conda = auto_detect_conda_packages(
             host_name=get_current_host_name(),
