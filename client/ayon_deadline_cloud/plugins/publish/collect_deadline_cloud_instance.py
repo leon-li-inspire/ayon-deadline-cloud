@@ -29,7 +29,3 @@ class CollectDeadlineCloudInstances(pyblish.api.ContextPlugin):
 
             instance.data["families"].append("deadline_cloud")
             instance.data["integrate"] = False
-            # add empty representation to bypass Maya Instance Empty
-            # validation. Ugly, but it works since the instance
-            # isn't integrated.
-            instance.data["representations"] = {}

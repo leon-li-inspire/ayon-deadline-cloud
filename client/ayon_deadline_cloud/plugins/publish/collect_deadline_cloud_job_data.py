@@ -34,6 +34,11 @@ class CollectDeadlineCloudJobData(
     targets: ClassVar[list[str]] = ["local"]
     families: ClassVar[list[str]] = ["deadline_cloud"]
     settings_category = "deadline_cloud"
+
+    # this could be used in the future for other hosts, but
+    # we would have to move any calls with deadline.maya_submitter
+    # to library.
+    hosts: ClassVar[list[str]] = ["maya"]
     log: Logger
 
     @classmethod
@@ -59,7 +64,7 @@ class CollectDeadlineCloudJobData(
         ]
 
     def process(self, instance: pyblish.api.Instance) -> None:
-        """Collect job data from Deadline Maya Submitter UI.
+        """Collect job data from Deadline Submitter UI.
 
         Args:
                 instance: Pyblish instance.
@@ -214,7 +219,8 @@ class CollectDeadlineCloudJobData(
     ) -> None:
         """Auto-detect and apply CondaPackages when not already set.
 
-        Replicates auto-detection logic from the Deadline Maya Submitter.
+        Replicates auto-detection logic from the Deadline Submitter.
+        This needs to be implemented per host in api.environment.
 
         Args:
             job_template: Job template dict (passed to auto-detection).

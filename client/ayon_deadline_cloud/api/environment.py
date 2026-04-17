@@ -3,10 +3,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from deadline.maya_submitter._version import (  # noqa: PLC2701
-    version_tuple as adaptor_version_tuple,
-)
-
 
 def _extract_renderers(job_template: dict[str, Any]) -> set[str]:
     """Extract renderers for a given job template.
@@ -54,6 +50,10 @@ class HostCondaPackages:
             A list of conda packages for Maya
 
         """
+        from deadline.maya_submitter._version import (  # noqa: PLC2701
+            version_tuple as adaptor_version_tuple,
+        )
+
         packages: list[str] = []
         try:
             import maya.cmds  # ty:ignore[unresolved-import]
