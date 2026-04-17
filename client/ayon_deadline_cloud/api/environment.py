@@ -62,11 +62,20 @@ class HostCondaPackages:
         except Exception:  # noqa: BLE001
             maya_version = None
 
+        # note: this is used to get the version of the adaptor, which is
+        # not necessarily the same as the Maya version. Sometimes it happens
+        # that the version in dev build is set incorrectly? to 0.0 and then
+        # the submitted jobs will fail because that conda package can't be
+        # found in the default conda channel. This simple fix will release
+        # the version constrain in that case.
         adaptor_version = ".".join(str(v) for v in adaptor_version_tuple[:2])
+        adaptor_version = f"={adaptor_version}.*"
+        if adaptor_version_tuple[0] == 0 and adaptor_version_tuple[1] == 0:
+            adaptor_version = ""
         packages.extend(
             (
                 f"maya={maya_version}.*",
-                f"maya-openjd={adaptor_version}",
+                f"maya-openjd{adaptor_version}",
             ))
 
         # handle maya renderers
