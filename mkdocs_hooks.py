@@ -7,10 +7,12 @@ import logging
 import os
 from pathlib import Path
 from shutil import rmtree
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 if TYPE_CHECKING:
     from logging import LogRecord
+
+    from mkdocs import MkDocsConfig
 
 TMP_FILE = "./missing_init_files.json"
 NFILES = []
@@ -113,7 +115,7 @@ def add_missing_init_files(*roots: str, msg: str = "") -> None:
         if not os.path.exists(root):
             continue
         rootpath = os.path.abspath(root)
-        for dirpath, dirs, files in os.walk(rootpath):
+        for dirpath, _dirs, files in os.walk(rootpath):
             if "__init__.py" in files:
                 continue
 
@@ -182,13 +184,16 @@ def remove_pychache_dirs(msg: str = "") -> None:
 
 # mkdocs hooks ----------------------------------------------------------------
 
-def on_startup(command: str, dirty: bool) -> None:
+def on_startup(
+        command: Literal["build", "gh-deploy", "serve"],  # noqa: ARG001
+        dirty: bool) -> None:  # noqa: ARG001, FBT001
     """Startup hook for mkdocs."""
     remove_pychache_dirs(msg="HOOK    -  on_startup")
 
 
-def on_pre_build(config):
-    """
+def on_pre_build(config: MkDocsConfig) -> None:  # noqa: ARG001
+    """Aadds temporary `__init__.py` files.
+
     This function is called before the MkDocs build process begins. It adds
     temporary `__init__.py` files to directories that do not contain one, to
     make sure mkdocs doesn't ignore them.
@@ -200,18 +205,17 @@ def on_pre_build(config):
             "services",
             msg="HOOK    -  on_pre_build",
         )
-    except BaseException as e:
-        logging.error(e)
+    except BaseException:
+        log.exception("Cleanup error")
         remove_missing_init_files(
             msg="HOOK    -  on_post_build: cleaning up on error !"
         )
         raise
 
 
-def on_post_build(config):
-    """
-    This function is called after the MkDocs build process ends. It removes
-    temporary `__init__.py` files that were added in the `on_pre_build()`
-    function.
+def on_post_build(config: MkDocsConfig) -> None:  # noqa: ARG001
+    """Removes temporary `__init__.py` added in the `on_pre_build()`.
+
+    This function is called after the MkDocs build process ends.
     """
     remove_missing_init_files(msg="HOOK    -  on_post_build")
