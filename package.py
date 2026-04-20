@@ -1,3 +1,4 @@
+"""Addon manifest."""
 # Required: lower case addon name e.g. 'deadline', otherwise addon
 #   will be invalid
 name = "deadline_cloud"
@@ -10,7 +11,7 @@ version = "0.0.1"
 
 # Name of client code directory imported in AYON launcher
 # - do not specify if there is no client code
-client_dir = None
+client_dir = "ayon_deadline_cloud"
 
 # Version compatibility with AYON server
 # ayon_server_version = ">=1.0.7"
