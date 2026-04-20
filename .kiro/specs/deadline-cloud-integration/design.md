@@ -232,15 +232,36 @@ class CondaPackage(BaseSettingsModel):
     name: str                  # e.g., "maya", "maya-openjd", "maya-vray"
     version: str               # Explicit version spec (e.g., "2026.*"), or "auto" to use installed version from artist machine, or "" for latest
 
-class CondaConfig(BaseSettingsModel):
-    """Conda package and channel configuration for farm workers.
+class DCCCondaConfig(BaseSettingsModel):
+    """Per-DCC conda package and channel configuration for farm workers.
+    
+    Each DCC has its own combination of conda packages (DCC app, OpenJD
+    adaptor, renderer, etc.). This model defines the packages for a
+    single DCC application.
     
     Overrides the default auto-detection behavior of the Deadline Cloud
     DCC submitters (e.g., deadline-cloud-for-maya), allowing studios to
     pin specific package versions from AYON server settings.
+    
+    Override model (follows AYON's standard settings override pattern):
+    - project settings → server settings → auto-detection
+    - Auto-detection is the default out of the box. If no settings are
+      configured at any level, the native submitter behavior is preserved.
+    - TDs only need to configure when they want explicit control.
+    
+    Channel behavior:
+    - By default the `deadline-cloud` channel is used implicitly by the
+      native submitter.
+    - As soon as custom_packages are added, channels must be defined
+      explicitly — either both `deadline-cloud` and the custom S3 channel
+      (e.g., `s3://my-studio-conda-123456789-us-west-2/Conda/Default`)
+      if standard AWS packages are still needed, or only the S3 channel
+      if everything including the adaptor is packaged custom.
     """
-    packages: list[CondaPackage] = []  # e.g., [{"name": "maya", "version": "2026.*"}, {"name": "maya-openjd", "version": "auto"}, {"name": "maya-vray", "version": ""}]
-    channels: list[str] = []           # Custom conda channels (overrides default channels if non-empty)
+    dcc_name: str              # "maya", "houdini", etc.
+    packages: list[CondaPackage] = []  # Standard DCC packages, e.g., [{"name": "maya", "version": "2026.*"}, {"name": "maya-openjd", "version": "auto"}, {"name": "maya-vray", "version": ""}]
+    custom_packages: list[CondaPackage] = []  # Studio-specific custom conda packages (proprietary tools, plugins, internal libraries)
+    channels: list[str] = []   # Conda channels. Empty = use default `deadline-cloud` channel implicitly. Must be set explicitly when custom_packages are used.
 
 class QueueConfig(BaseSettingsModel):
     """A named Deadline Cloud queue."""
@@ -255,7 +276,7 @@ class DeadlineCloudSettings(BaseSettingsModel):
     default_profile: str = ""
     available_queues: list[QueueConfig] = []   # All available queues defined at server level
     default_queue_id: str = ""                 # Server-level default queue
-    conda_config: CondaConfig = CondaConfig()  # Conda package/channel overrides
+    dcc_conda_configs: list[DCCCondaConfig] = []  # Per-DCC conda package/channel configuration
     host_requirements: HostRequirements = HostRequirements()  # Worker host hardware/OS overrides
     dcc_defaults: list[DCCSubmissionDefaults] = []
     post_render: PostRenderSettings = PostRenderSettings()
@@ -263,8 +284,14 @@ class DeadlineCloudSettings(BaseSettingsModel):
     auto_detect_credentials: bool = True
 
 class ProjectDeadlineCloudSettings(BaseSettingsModel):
-    """Per-project overrides for Deadline Cloud settings."""
+    """Per-project overrides for Deadline Cloud settings.
+    
+    Follows AYON's standard settings override model: studio defaults
+    apply everywhere, projects only override when needed. Empty/default
+    values inherit from server settings.
+    """
     default_queue_id: str = ""  # Project-level override; empty = use server default
+    dcc_conda_configs: list[DCCCondaConfig] = []  # Project-level per-DCC conda overrides; empty = use server defaults
 
 class CustomValidation(BaseSettingsModel):
     """Studio-configurable validation rule."""
@@ -345,7 +372,7 @@ class SubmitterBridge:
         `CondaPackages` and `RezPackages` shared parameter values that
         are passed to `SubmitJobToDeadlineDialog`.
 
-        If settings.conda_config.packages is non-empty, those packages
+        If a DCCCondaConfig exists for the active DCC, those packages
         replace the auto-detected values (e.g., the default
         `conda_packages = f"maya={maya_version}.* maya-openjd={adaptor_version}.*"`
         from deadline-cloud-for-maya).
@@ -357,13 +384,18 @@ class SubmitterBridge:
 
     def _resolve_conda_packages(
         self,
-        conda_config: CondaConfig,
+        dcc_name: str,
+        server_settings: DeadlineCloudSettings,
+        project_settings: ProjectDeadlineCloudSettings | None,
         dcc_context: dict[str, Any],
     ) -> str:
-        """Resolve conda package string from AYON settings.
+        """Resolve conda package string from AYON settings for a specific DCC.
+
+        Looks up the DCCCondaConfig for the active DCC, following the
+        override chain: project → server → auto-detection.
 
         Builds the conda package specification string by combining
-        AYON-configured packages with version resolution:
+        standard packages and custom packages with version resolution:
         - Explicit versions are used as-is (e.g., "maya=2026.*")
         - "auto" versions are resolved from the artist's installed DCC
         - Empty versions use latest (e.g., "maya-vray")
@@ -412,17 +444,36 @@ The native Deadline Cloud DCC submitters (e.g., `deadline-cloud-for-maya`) auto-
 conda_packages = f"maya={maya_version}.* maya-openjd={adaptor_version}.*"
 ```
 
-The AYON integration overrides this behavior when `conda_config.packages` is configured in server settings. AYON's settings take precedence over the auto-detected values. This is an intentional design decision — studios need version pinning control for reproducibility and stability on the farm.
+The AYON integration overrides this behavior when a `DCCCondaConfig` is configured for the active DCC in server or project settings. AYON's settings take precedence over the auto-detected values. This is an intentional design decision — studios need version pinning control for reproducibility and stability on the farm.
+
+Conda packages are defined **per DCC**. Each DCC has its own combination of packages — Maya needs `maya`, `maya-openjd`, and a renderer package like `maya-vray`; Houdini would need `houdini`, `houdini-openjd`, etc. The settings structure reflects this so TDs configure packages for each DCC independently.
+
+**Override resolution chain** (follows AYON's standard [settings override model](https://help.ayon.app/help/articles/8317800-working-with-settings)):
+
+**project `dcc_conda_configs` → server `dcc_conda_configs` → auto-detection**
+
+Auto-detection is the default out of the box. If no settings are configured at any level, the native submitter behavior is preserved. Studios can start using the integration without configuring any conda settings. TDs only step in to pin versions when they need explicit control. A TD sets `maya-vray=*` (latest) at the studio level once. If a specific project needs to stay on VRay 6.x, they override just that project. No need to configure every project individually.
 
 Key override rules:
-- If `conda_config.packages` is non-empty, AYON builds the `CondaPackages` parameter value from settings instead of using auto-detection
+- If a `DCCCondaConfig` exists for the active DCC (at project or server level), AYON builds the `CondaPackages` parameter value from settings instead of using auto-detection
+- Project-level `dcc_conda_configs` take precedence over server-level for the same DCC
 - `CondaPackages` and `CondaChannels` are [queue environment parameters](https://docs.aws.amazon.com/deadline-cloud/latest/userguide/create-queue-environment.html) — the default conda queue environment adds these as job parameters at submission time. The submitter populates them based on the DCC application. AYON overrides these parameter values before submission.
-- The Maya version always comes from AYON server settings (not auto-detected from the artist's DCC)
-- For `maya-openjd`, the version depends on what's installed on the artist's machine when `version="auto"` is set — this allows the adaptor version to track the artist's local installation while still being explicitly controllable
-- If `conda_config.channels` is non-empty, those channels override the default conda channels
-- If `conda_config` is empty/default, the native submitter's auto-detection behavior is preserved (backward compatible)
+- For packages with `version="auto"`, the version depends on what's installed on the artist's machine — this allows the adaptor version to track the artist's local installation while still being explicitly controllable
+- If no `DCCCondaConfig` exists for the active DCC at any level, the native submitter's auto-detection behavior is preserved (backward compatible)
 
-> **Integration Consideration**: This override may conflict with the native submitter's auto-detection logic. The AYON integration explicitly takes precedence. Studios should be aware that enabling conda config in AYON settings will suppress the submitter's built-in version resolution. This is documented as a known integration point that requires coordination between AYON addon updates and Deadline Cloud submitter updates.
+**Custom conda packages and channels:**
+
+The `custom_packages` field on `DCCCondaConfig` allows TDs to add studio-specific conda packages beyond the standard DCC/renderer/adaptor set (proprietary tools, custom plugins, internal libraries).
+
+When custom packages are used, channels must be defined explicitly. By default the `deadline-cloud` channel is used implicitly by the native submitter. As soon as custom packages are added, the `channels` field must be set — either both `deadline-cloud` and the custom S3 channel (e.g., `s3://my-studio-conda-123456789-us-west-2/Conda/Default`) if standard AWS packages are still needed, or only the S3 channel if everything including the adaptor is packaged custom.
+
+**Publisher UI visibility:**
+
+The resolved conda packages (from the override chain) are displayed as editable fields on the render instance in the AYON Publisher UI. This lets artists adjust packages before submitting (e.g., testing a different renderer version) without needing TD access to server settings. Whatever they set still goes through the publish validation step before submission, so invalid or unsupported packages are caught before reaching the farm. Central conda config acts as a form of human validation — TDs explicitly define what runs on the farm rather than relying on auto-detection.
+
+> **Current implementation note**: PR #5 implements a simpler version of this — an "Extra Conda Packages" text field that appends to the resolved packages. The full design calls for displaying and editing the complete resolved package list, not just appending extras. The current auto-detection logic in `environment.py` is already per-host (`_get_conda_pkgs_for_maya`), which aligns with the per-DCC `DCCCondaConfig` model. The implementation needs to evolve from flat string settings to the structured per-DCC model with project-level overrides.
+
+> **Integration Consideration**: Enabling per-DCC conda config in AYON settings will suppress the native submitter's built-in version resolution for that DCC. Studios should be aware that this requires coordination between AYON addon updates and Deadline Cloud submitter updates.
 
 > **Conda Version Pinning**: AWS recommends pinning to major.minor versions only (e.g., `maya=2026`, not `maya=2026.1`), because patch releases replace previous packages on the `deadline-cloud` channel. Pinning to a specific patch version will cause submissions to fail when that patch is superseded. The AYON settings UI should guide studios toward this best practice. See [Default conda queue environment](https://docs.aws.amazon.com/deadline-cloud/latest/userguide/create-queue-environment.html) for the full list of available packages and pinning guidance.
 
@@ -483,6 +534,15 @@ class ValidateRenderElements:
 
 class ValidateRenderSettings:
     """Studio-configurable: Enforce specific render settings (resolution, sampling, etc.)."""
+    def process(self, instance: CollectedRenderInstance) -> None: ...
+
+class ValidateCondaPackages:
+    """Validate resolved conda packages before submission.
+    
+    Checks that the conda package string is well-formed and that
+    channels are defined when custom packages are present. This
+    validation also runs when artists edit packages in the Publisher UI.
+    """
     def process(self, instance: CollectedRenderInstance) -> None: ...
 ```
 
@@ -762,8 +822,8 @@ def map_instance_to_params(
 - `result.queue_id` follows the resolution priority: instance override > project default > server default > first available
 - `result.frame_range` is formatted as DC-compatible string (e.g., "1-100")
 - `result.post_render_config` contains all data needed for post-render publishing
-- If `settings.conda_config.packages` is non-empty, `result.conda_packages` is the resolved conda string from AYON settings (not auto-detected)
-- If `settings.conda_config.packages` is empty, `result.conda_packages` is None (native auto-detection preserved)
+- If a `DCCCondaConfig` exists for the active DCC (at project or server level), `result.conda_packages` is the resolved conda string from AYON settings (not auto-detected)
+- If no `DCCCondaConfig` exists for the active DCC at any level, `result.conda_packages` is None (native auto-detection preserved)
 - If any field in `settings.host_requirements` is non-None, `result.host_requirements` contains only those fields; otherwise `result.host_requirements` is None (submitter defaults preserved)
 - No side effects on `instance` or `settings`
 
@@ -876,13 +936,18 @@ def execute_submission(publisher_context, settings):
     assert profile is not None, "No valid farm profile found"
 
     # Step 1b: Resolve conda packages from AYON settings (overrides auto-detection)
-    conda_packages = resolve_conda_packages(
-        settings.conda_config,
+    # Resolved per-DCC: looks up DCCCondaConfig for the active DCC,
+    # project settings override server settings, auto-detection is fallback.
+    dcc_name = get_active_dcc_name()  # e.g., "maya", "houdini"
+    project_settings = get_project_settings(publisher_context.project_name)
+    conda_packages, conda_channels = resolve_conda_packages(
+        dcc_name=dcc_name,
+        server_settings=settings,
+        project_settings=project_settings,
         dcc_context=get_dcc_context(),  # Artist's installed DCC/adaptor versions
     )
 
     # Step 1c: Resolve queue ID (instance override > project > server > first available)
-    project_settings = get_project_settings(publisher_context.project_name)
     queue_id = resolve_queue_id(settings, project_settings)
 
     # Step 1d: Resolve host requirements from AYON settings
@@ -905,7 +970,7 @@ def execute_submission(publisher_context, settings):
         # Apply conda package override if configured
         if conda_packages:
             params.conda_packages = conda_packages
-            params.conda_channels = settings.conda_config.channels or None
+            params.conda_channels = conda_channels or None
         # Apply host requirements override if configured
         if host_requirements:
             params.host_requirements = host_requirements
@@ -1081,24 +1146,41 @@ def resolve_queue_id(
 
 ```python
 def resolve_conda_packages(
-    conda_config: CondaConfig,
+    dcc_name: str,
+    server_settings: DeadlineCloudSettings,
+    project_settings: ProjectDeadlineCloudSettings | None,
     dcc_context: dict[str, Any],
-) -> str:
+) -> tuple[str, list[str]]:
     """
-    ALGORITHM: Resolve conda package string from AYON settings.
-    INPUT: conda_config (from server settings), dcc_context (artist's DCC environment info)
-    OUTPUT: conda_packages_str (space-separated package spec string)
+    ALGORITHM: Resolve conda package string and channels from AYON settings for a specific DCC.
+    INPUT: dcc_name (active DCC), server_settings, project_settings (per-project overrides), dcc_context (artist's DCC environment info)
+    OUTPUT: (conda_packages_str, channels) — space-separated package spec string and list of channels
 
-    If conda_config.packages is empty, returns empty string (native submitter
-    auto-detection is preserved). Otherwise, builds the package string from
-    AYON settings, overriding the submitter's auto-detected values.
+    Override chain: project dcc_conda_configs → server dcc_conda_configs → auto-detection
+    If no DCCCondaConfig exists for the active DCC at any level, returns empty
+    (native submitter auto-detection is preserved).
     """
 
-    if not conda_config.packages:
-        return ""  # No override — let native submitter auto-detect
+    # Step 1: Find DCCCondaConfig for this DCC, project level first
+    dcc_config = None
+    if project_settings:
+        dcc_config = next(
+            (c for c in project_settings.dcc_conda_configs if c.dcc_name == dcc_name),
+            None,
+        )
+    if dcc_config is None:
+        dcc_config = next(
+            (c for c in server_settings.dcc_conda_configs if c.dcc_name == dcc_name),
+            None,
+        )
 
+    if dcc_config is None or (not dcc_config.packages and not dcc_config.custom_packages):
+        return ("", [])  # No override — let native submitter auto-detect
+
+    # Step 2: Build package string from standard + custom packages
+    all_packages = list(dcc_config.packages) + list(dcc_config.custom_packages)
     parts = []
-    for pkg in conda_config.packages:
+    for pkg in all_packages:
         if pkg.version == "auto":
             # Resolve version from artist's installed DCC/adaptor
             installed_version = dcc_context.get(f"{pkg.name}_version", "")
@@ -1111,7 +1193,12 @@ def resolve_conda_packages(
         else:
             parts.append(pkg.name)  # Empty version = latest
 
-    return " ".join(parts)
+    # Step 3: Resolve channels
+    # Default `deadline-cloud` channel is implicit when no custom packages exist.
+    # When custom packages are present, channels must be explicit.
+    channels = dcc_config.channels if dcc_config.channels else []
+
+    return (" ".join(parts), channels)
 ```
 
 ## Example Usage
@@ -1151,14 +1238,16 @@ settings = DeadlineCloudSettings(
         ),
     ],
     default_queue_id="queue-xyz789",
-    conda_config=CondaConfig(
-        packages=[
-            CondaPackage(name="maya", version="2026.*"),
-            CondaPackage(name="maya-openjd", version="auto"),  # Use artist's installed version
-            CondaPackage(name="maya-vray", version=""),         # Latest available
-        ],
-        channels=["my-studio-conda-channel"],
-    ),
+    dcc_conda_configs=[
+        DCCCondaConfig(
+            dcc_name="maya",
+            packages=[
+                CondaPackage(name="maya", version="2026.*"),
+                CondaPackage(name="maya-openjd", version="auto"),  # Use artist's installed version
+                CondaPackage(name="maya-vray", version=""),         # Latest available
+            ],
+        ),
+    ],
     dcc_defaults=[
         DCCSubmissionDefaults(
             dcc_name="maya",
@@ -1215,12 +1304,55 @@ queue_id = resolve_queue_id(
 )
 # Returns "queue-previs" (project override takes precedence over server default)
 
-# Example 5: Conda package resolution
-conda_str = resolve_conda_packages(
-    conda_config=settings.conda_config,
+# Example 5: Per-DCC conda package resolution
+conda_str, channels = resolve_conda_packages(
+    dcc_name="maya",
+    server_settings=server_settings,
+    project_settings=None,  # No project override — uses server defaults
     dcc_context={"maya-openjd_version": "0.15"},
 )
-# Returns: "maya=2026.* maya-openjd=0.15.* maya-vray"
+# Returns: ("maya=2026.* maya-openjd=0.15.* maya-vray", [])
+
+# Example 5b: Per-project conda override (project A pins VRay 6.x for Maya 2024)
+project_a_settings = ProjectDeadlineCloudSettings(
+    default_queue_id="queue-previs",
+    dcc_conda_configs=[
+        DCCCondaConfig(
+            dcc_name="maya",
+            packages=[
+                CondaPackage(name="maya", version="2024.*"),
+                CondaPackage(name="maya-openjd", version="auto"),
+                CondaPackage(name="maya-vray", version="6.*"),
+            ],
+        ),
+    ],
+)
+conda_str, channels = resolve_conda_packages(
+    dcc_name="maya",
+    server_settings=server_settings,
+    project_settings=project_a_settings,
+    dcc_context={"maya-openjd_version": "0.15"},
+)
+# Returns: ("maya=2024.* maya-openjd=0.15.* maya-vray=6.*", [])
+# Project override takes precedence over server default (maya=2026.*)
+
+# Example 5c: Custom conda packages with custom S3 channel
+custom_config = DCCCondaConfig(
+    dcc_name="maya",
+    packages=[
+        CondaPackage(name="maya", version="2026.*"),
+        CondaPackage(name="maya-openjd", version="auto"),
+    ],
+    custom_packages=[
+        CondaPackage(name="my-studio-maya-tools", version="1.2.*"),
+    ],
+    channels=[
+        "deadline-cloud",  # Still need standard packages (maya, maya-openjd)
+        "s3://my-studio-conda-123456789-us-west-2/Conda/Default",
+    ],
+)
+# Both channels required: deadline-cloud for standard packages,
+# S3 channel for custom my-studio-maya-tools package
 
 # Example 6: Host requirements override (GPU renders need GPU workers)
 settings_with_gpu = DeadlineCloudSettings(
@@ -1254,13 +1386,15 @@ The following properties must hold for the integration to be correct:
 
 7. **Profile Resolution Determinism**: For the same settings and override inputs, `resolve_farm_profile` always returns the same profile. The resolution order is deterministic: explicit override > default > first.
 
-8. **Conda Override Precedence**: When `conda_config.packages` is non-empty in AYON settings, the resolved `CondaPackages` parameter value must match the AYON-configured packages, not the native submitter's auto-detected values. Formally: `∀s: s.conda_config.packages ≠ [] ⟹ submission.conda_packages == resolve_conda_packages(s.conda_config)`.
+8. **Conda Override Precedence**: When a `DCCCondaConfig` exists for the active DCC, the resolved `CondaPackages` parameter value must match the AYON-configured packages, not the native submitter's auto-detected values. Project-level config takes precedence over server-level for the same DCC. Formally: `∀dcc, s: dcc_conda_config(dcc, s) ≠ empty ⟹ submission.conda_packages == resolve_conda_packages(dcc, s)`, where `dcc_conda_config` resolves project → server → empty.
 
 9. **Queue Resolution Determinism**: For the same settings, project settings, and instance override, `resolve_queue_id` always returns the same queue ID. The resolution order is deterministic: instance override > project default > server default > first available.
 
 10. **Output Download Precondition**: For job attachments mode, post-render processing must not begin validation or file operations until outputs have been successfully downloaded via the Deadline Cloud CLI. Formally: `∀j: j.storage_mode == "job_attachments" ⟹ download_complete(j) before discover_outputs(j)`.
 
 11. **Host Requirements Override Precedence**: When any field in `host_requirements` is non-None in AYON settings, the corresponding field in the OJD template's hostRequirements must match the AYON-configured value. Unset fields must not be injected (submitter defaults preserved). Formally: `∀f ∈ HostRequirements.fields: f is not None ⟹ ojd.hostRequirements[f] == settings.host_requirements[f]`.
+
+12. **Conda Package Validation Gate**: For all submissions where conda packages are resolved (from settings or artist edits in Publisher UI), the packages must pass validation before submission. Invalid package specs or missing channels when custom packages are present must block submission. Formally: `∀s: conda_validation_failed(s) ⟹ ¬submitted(s)`.
 
 ## Error Handling
 
@@ -1309,6 +1443,7 @@ For MVP, monitoring is informational only — artists can check job status via t
 
 - Test `map_instance_to_params` with various instance configurations and settings combinations
 - Test `resolve_farm_profile` with all priority paths (override, default, fallback)
+- Test `resolve_conda_packages` with per-DCC configs: project override, server fallback, auto-detection fallback, custom packages with channels
 - Test validation plugins independently with mock DCC data
 - Test `PostRenderProcessor.validate_outputs` with complete, partial, and empty file sets
 - Test `PostRenderConfig` serialization/deserialization (data must survive round-trip through Deadline Cloud job parameters)
@@ -1322,6 +1457,7 @@ For MVP, monitoring is informational only — artists can check job status via t
 - **Frame range mapping**: For any valid `(start, end)` tuple where `start <= end`, the mapped DC frame range string parses back to the same range
 - **Submission params completeness**: For any valid `CollectedRenderInstance` and `DeadlineCloudSettings`, `map_instance_to_params` returns params where all required fields are non-empty
 - **Validation correctness**: For any file list where `expected ⊆ discovered`, validation returns `is_valid=True`; for any list where `expected ⊄ discovered`, returns `is_valid=False`
+- **Conda resolution determinism**: For the same DCC name, server settings, project settings, and DCC context, `resolve_conda_packages` always returns the same result. Project-level config always takes precedence over server-level for the same DCC.
 
 ### Integration Testing Approach
 
