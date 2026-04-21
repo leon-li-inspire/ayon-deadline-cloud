@@ -14,11 +14,11 @@ The key architectural principle is **separation of responsibilities**: AYON owns
 
 - **Studio-configurable validations**: Pre-submission validation plugins that run before any resource-intensive operations. Includes both built-in technical validations (renderable camera exists, valid frame range) and studio-defined custom validations (required AOVs, render settings checks).
 - **Publishing and processing results**: Version registration in AYON, transcoding, reviewable creation, burnins, file movement/renaming via path templates.
-- **Post-render publishing on-prem**: Rendered outputs are downloaded to the studio (via auto-download cron or AYON service), and the publish pipeline runs locally on a dedicated machine with filesystem access.
+- **Post-render publishing via on-prem CMF worker**: The render job includes a PUBLISH step that runs on an on-prem customer-managed fleet (CMF) worker. The worker downloads render outputs from S3 via the Deadline Cloud credential chain (no VPN needed) and runs the publish pipeline locally. This keeps the full render→publish flow within a single Deadline Cloud job.
 
 ### Deferred (Post-MVP)
 
-- **Farm-side post-render**: Running the publish pipeline on Deadline Cloud workers as OpenJD template steps. Requires a lightweight headless publish runner (without full AYON launcher/Qt dependencies) and fileshare access from workers. See [Post-Render Execution Model](#post-render-execution-model) for the full trade-off analysis.
+- **Fully cloud-based publishing**: Once the publish worker fleet has access to the studio fileshare via VPN, Direct Connect, or FSx, the on-prem CMF can be replaced with a cloud CMF or SMF. The same OJD job template works — no changes to the AYON integration needed.
 - **Advanced project tracking**: Higher-level job dependencies beyond render→publish, priority management across assets, planning integration, task status updates.
 - **Asset-level dependencies**: Complex dependency graphs like "create render archives → render images → publish".
 - **Cross-job orchestration**: Managing priorities and dependencies across multiple submissions.
@@ -46,30 +46,30 @@ graph TD
     subgraph "AWS Deadline Cloud"
         D --> H[Deadline Cloud Submitter Tool]
         H -->|OJD Job Bundle| I[Deadline Cloud API]
-        I --> J[Render Job]
+        I --> J[Step 1: RENDER - SMF]
+        J -->|write outputs| S1
+        J -->|depends on| K[Step 2: PUBLISH - On-Prem CMF]
     end
 
-    subgraph "On-Prem Post-Render Pipeline (MVP)"
-        P1[Auto-Download / AYON Service] --> P2[Output Discovery & Validation]
-        P2 --> P3[File Movement / Renaming]
-        P3 --> P4[Transcoding / Burnins]
-        P4 --> P5[Version Registration in AYON]
+    subgraph "On-Prem CMF Worker"
+        K -->|sync outputs from S3| L[Output Discovery & Validation]
+        L --> M[File Movement / Renaming]
+        M --> N[Transcoding / Burnins]
+        N --> O[Version Registration in AYON]
     end
 
     A -.->|fetch settings| E
     D -.->|pre-populate options| H
     J -->|read inputs| S1
     J -->|read inputs| S2
-    J -->|write outputs| S1
-    J -->|write outputs| S2
-    S1 -->|download outputs| P1
-    S2 -->|access outputs| P1
-    P5 -.->|register versions| E
+    O -.->|register versions| E
 ```
 
-> **Note on MVP job structure**: For MVP, Deadline Cloud handles rendering only. The job submitted is a render-only job — there is no post-render step within the Deadline Cloud job. Post-render publishing runs on-prem, triggered by output availability (via auto-download cron or AYON service). This keeps the Deadline Cloud integration focused on rendering while AYON handles the full publish pipeline locally.
+> **Job structure**: A single Deadline Cloud job with two steps. The RENDER step runs on a service-managed fleet (SMF) and produces outputs as job attachments in S3. The PUBLISH step depends on RENDER and runs on an on-prem customer-managed fleet (CMF) worker. The on-prem worker downloads render outputs from S3 via the Deadline Cloud credential chain (`AssumeQueueRoleForWorker` → queue role with S3 access). No VPN is needed — all communication is outbound HTTPS.
 >
-> **Target state (post-MVP)**: Post-render steps defined as [OpenJD templates](https://github.com/OpenJobDescription/openjd-specifications/wiki/2023-09-Template-Schemas) that can run either as dependent steps within the Deadline Cloud job (on farm workers) or on-prem via the [OpenJD runtime](https://github.com/OpenJobDescription/openjd-sessions). This gives customers the choice based on their infrastructure (cloud-native vs on-prem vs hybrid). See [Post-Render Execution Model](#post-render-execution-model) for details.
+> Per-step host requirements in the [OJD template](https://github.com/OpenJobDescription/openjd-specifications/wiki/2023-09-Template-Schemas) route each step to the correct fleet. Both the SMF and on-prem CMF are associated with the same queue. Custom capability attributes (e.g., `attr.worker.fleet.type`) differentiate them.
+>
+> **Path to fully cloud-based publishing**: Because the PUBLISH step is defined as an OpenJD template, the same job structure works when the publish fleet moves to the cloud. Once the publish fleet has fileshare access via VPN, Direct Connect, or FSx, the on-prem CMF can be replaced with a cloud CMF or SMF — no changes to the job template or AYON integration needed.
 
 ## Sequence Diagrams
 
@@ -108,31 +108,34 @@ sequenceDiagram
     end
 ```
 
-### Post-Render Publishing Flow (MVP — On-Prem)
+### Post-Render Publishing Flow (On-Prem CMF Worker)
 
 ```mermaid
 sequenceDiagram
     participant DC as Deadline Cloud
-    participant DL as Auto-Download / AYON Service
-    participant Script as Post-Render Script (On-Prem)
+    participant S3 as S3 Job Attachments
+    participant Worker as On-Prem CMF Worker
     participant AYON as AYON Server API
 
-    DC->>DC: Render job completes
-    DL->>DC: Download outputs (deadline queue sync-output / manual)
-    DC-->>DL: Rendered output files
+    DC->>DC: RENDER step completes (all tasks)
+    DC->>Worker: Schedule PUBLISH step (dependency satisfied)
+    Worker->>DC: AssumeQueueRoleForWorker
+    DC-->>Worker: Queue role credentials (S3 access)
+    Worker->>S3: Sync render outputs (job attachments)
+    S3-->>Worker: Rendered output files
 
-    DL->>Script: Trigger publish pipeline (outputs available locally)
-    Script->>Script: Discover rendered output files
-    Script->>Script: Validate outputs (frame completeness, file integrity)
+    Worker->>Worker: Discover rendered output files
+    Worker->>Worker: Validate outputs (frame completeness, file integrity)
 
     alt Validation Failed
-        Script->>Script: Report failure
+        Worker->>DC: Report step failure
     else Validation Passed
-        Script->>Script: Move/rename files via path templates
-        Script->>Script: Run transcoding (if configured)
-        Script->>Script: Apply burnins (if configured)
-        Script->>AYON: Register version (files, metadata)
-        AYON-->>Script: Version registered
+        Worker->>Worker: Move/rename files via path templates
+        Worker->>Worker: Run transcoding (if configured)
+        Worker->>Worker: Apply burnins (if configured)
+        Worker->>AYON: Register version (files, metadata)
+        AYON-->>Worker: Version registered
+        Worker->>DC: Report step success
     end
 ```
 
@@ -557,31 +560,46 @@ class ValidateCondaPackages:
 
 #### Post-Render Execution Model
 
-**MVP: On-prem post-render.** Rendered outputs are downloaded to the studio via auto-download (`deadline queue sync-output` as a cron job) or an AYON service. The publish pipeline runs locally on a dedicated machine with access to the studio filesystem. This is the simplest path — it avoids cloud packaging, worker-to-AYON connectivity, and fileshare access complexity.
+**Hybrid SMF + on-prem CMF approach.** The render job is a single Deadline Cloud job with two steps. The RENDER step runs on a service-managed fleet (cloud). The PUBLISH step runs on an on-prem customer-managed fleet worker, with a step dependency on RENDER. The on-prem worker downloads render outputs from S3 via the Deadline Cloud credential chain and runs the publish pipeline locally (transcoding, burnins, file movement, AYON version registration).
 
-**Target state (post-MVP): Farm-side post-render via OpenJD templates.** Post-render steps are defined as OpenJD templates that can run as dependent steps on Deadline Cloud workers or on-prem via the OpenJD runtime (`openjd-sessions`). This gives customers the choice based on their infrastructure. The same templates work in both environments — the "where does it run?" question becomes a deployment choice per customer, not a development decision.
+This keeps the full render→publish flow within a single Deadline Cloud job — no external orchestration, no cron jobs, no separate AYON service. The job either succeeds (render + publish) or fails with full visibility in the Deadline Cloud Monitor.
+
+**Per-step fleet routing.** The [OJD spec](https://github.com/OpenJobDescription/openjd-specifications/wiki/2023-09-Template-Schemas) defines `hostRequirements` at the step level. Each step can target a different fleet via custom capability attributes (e.g., `attr.worker.fleet.type` = `"smf-render"` vs `"cmf-publish"`). Both fleets are associated with the same queue. From the [AWS docs](https://docs.aws.amazon.com/deadline-cloud/latest/userguide/jobs-processing.html): "The fleet is chosen based on the capabilities configured for the fleet and the host requirements of a specific step."
+
+**Submission hooks for job template assembly.** The [submission hooks feature](https://github.com/aws-deadline/deadline-cloud/pull/986) (`hooks.yaml` in job bundles or via `DEADLINE_HOOKS_DIR`) can inject the PUBLISH step into the OJD template at submission time. A pre-submission hook adds the PUBLISH step with the correct `hostRequirements`, `dependsOn`, and AYON context metadata. AYON's pre-launch hook sets `DEADLINE_HOOKS_DIR` to point to AYON-managed hook scripts, so this applies to all submissions without modifying job bundles.
+
+**On-prem worker S3 access (no VPN needed).** The on-prem worker accesses S3 job attachments through the Deadline Cloud credential chain:
+1. Worker bootstraps with `AWSDeadlineCloud-WorkerHost` credentials via [IAM Roles Anywhere](https://docs.aws.amazon.com/rolesanywhere/latest/userguide/introduction.html) (certificate-based, recommended for production) or IAM user access keys (for testing)
+2. Worker calls `AssumeFleetRoleForWorker` → fleet role credentials (auto-refreshed)
+3. When processing the PUBLISH step, worker calls `AssumeQueueRoleForWorker` → queue role credentials with S3 `GetObject`/`PutObject` on the job attachments bucket
+4. Worker agent syncs render outputs from S3 before the step script runs
+
+All communication is outbound HTTPS (port 443) to: `scheduling.deadline.{region}.amazonaws.com`, `s3.{region}.amazonaws.com`, `logs.{region}.amazonaws.com`. No inbound connections. IAM Identity Center is not suitable here — it's for interactive human users, not headless worker agents.
+
+**On-prem worker prerequisites:**
+- [Deadline Cloud worker agent](https://github.com/aws-deadline/deadline-cloud-worker-agent) installed
+- IAM Roles Anywhere trust anchor configured (or IAM user keys for testing)
+- Software dependencies: ffmpeg, OIIO, lightweight AYON publish runner. These can be packaged as conda packages and installed at step runtime via the conda queue environment — the same mechanism used for DCC packages on the render step. This means publish workers don't need all dependencies pre-installed, and studios can scale to multiple on-prem worker nodes without managing software on each one individually.
+- Network: outbound HTTPS to AWS endpoints + access to AYON server on the studio network
+
+**Path to fully cloud-based publishing.** Because the PUBLISH step is defined as an OpenJD template, the same job structure works when the publish fleet moves to the cloud. Once the publish fleet has fileshare access via VPN, Direct Connect, or FSx, the on-prem CMF can be replaced with a cloud CMF or SMF — no changes to the job template or AYON integration needed.
 
 **Trade-offs:**
 
-| | On-prem (MVP) | On-farm (post-MVP) |
-|---|---|---|
-| Compute | Dedicated studio machine | Farm workers (scales with farm) |
-| Fileshare access | Direct (local filesystem) | Depends on fleet type (see below) |
-| AYON dependencies | Already available locally | Must be packaged (conda, host config, AMI) |
-| Latency | Download first, then process | Processing starts after render |
-| Setup complexity | AYON service + auto-download | OpenJD templates + dependency packaging |
+| | On-prem publish (external) | Hybrid on-prem CMF (this design) | Fully cloud-based (post-MVP) |
+|---|---|---|---|
+| Compute | Local machine / AYON service | On-prem CMF worker(s) | Cloud CMF or SMF workers |
+| Orchestration | External (cron/trigger) | Within DLC job | Within DLC job |
+| VPN needed | No | No | Yes (for fileshare access) |
+| AYON deps | Already local | Local or via conda | Must be packaged (conda/AMI) |
+| Latency | Download first, then process | S3 sync only | Immediate (fileshare access) |
+| DLC job tracking | Separate | Full visibility | Full visibility |
+| Scalability | Single machine | Multiple CMF workers | Scales with farm |
+| Setup | Service/cron infra | CMF fleet + IAM Roles Anywhere | + VPN/Direct Connect/FSx |
 
-**Fileshare access by fleet type (relevant for farm-side post-render):**
-- **CMF on-prem**: Workers already on studio network, direct access
-- **CMF on EC2**: Workers in customer VPC, reach on-prem via VPN/Direct Connect
-- **SMF**: Workers can access customer VPC resources (NFS, fileshares) via [VPC Lattice resource endpoints](https://docs.aws.amazon.com/deadline-cloud/latest/developerguide/smf-vpc.html)
-- **Cloud-native storage**: A synchronized fileshare available in the cloud (e.g., FSx) works directly
-
-**Prerequisites for farm-side post-render:**
-- OpenJD templates defining the post-render steps
-- A lightweight headless publish runner (subset of ayon-core, without full launcher/Qt dependencies)
-- AYON dependencies available on workers (via conda packages, host configuration scripts, or pre-baked AMIs)
-- Network connectivity from workers to the AYON server API
+**Open questions:**
+- **Job attachment sync between steps**: Does the worker agent automatically sync outputs from a previous step as inputs to a dependent step within the same job? Or does the PUBLISH step script need to explicitly download them via `deadline job download-output`? This needs testing.
+- **IAM Roles Anywhere setup complexity**: For studios without an existing PKI/CA, setting up IAM Roles Anywhere adds infrastructure overhead. AWS Private CA is an option but has cost implications. For smaller studios, time-bound IAM user keys may be the pragmatic starting point.
 
 **Purpose**: Handles output validation, transcoding, burnin application, and version registration in AYON after rendering completes. May run as a Deadline Cloud dependent step (on farm) or locally within the AYON pipeline (see TBD above).
 
