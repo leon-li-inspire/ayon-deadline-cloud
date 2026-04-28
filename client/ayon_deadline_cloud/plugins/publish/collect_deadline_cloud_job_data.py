@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Optional
 
 import pyblish.api
 from ayon_core.lib import TextDef
@@ -40,6 +40,38 @@ class CollectDeadlineCloudJobData(
     # to library.
     hosts: ClassVar[list[str]] = ["maya"]
     log: Logger
+
+    @staticmethod
+    def add_ayon_context_parameter(
+            param_defs: list[dict[str, Any]],
+            name: str,
+            default: str,
+            description: Optional[str],
+    ) -> None:
+        """Add an AYON context string parameter.
+
+        Adds STRING parameter to template with AYON
+        namespace.
+
+        Args:
+            param_defs: List of parameter definitions to append to.
+            name: Name of the parameter (without namespace).
+            default: Default value for the parameter.
+            description: Optional description for the parameter.
+
+        """
+        param = {
+               "name": f"ayon:{name}",
+               "type": "STRING",
+               "dataFlow": "OUT",
+               "userInterface": {
+                   "control": "HIDDEN",
+               },
+               "default": f"{default}",
+        }
+        if description is not None:
+            param["description"] = description
+        param_defs.append(param)
 
     @classmethod
     def get_attr_defs_for_instance(
@@ -82,9 +114,69 @@ class CollectDeadlineCloudJobData(
         pv_by_name: dict[str, dict] = {
             pv["name"]: pv for pv in parameter_values
         }
+
+        template_param_defs = job_template.get("parameterDefinitions", [])
+
         template_param_names = {
             p["name"] for p in job_template.get("parameterDefinitions", [])
         }
+        # inject AYON context and other data used by the publishing step
+        if "ayon:folderPath" not in template_param_names:
+            self.add_ayon_context_parameter(
+               template_param_defs,
+               name="folderPath",
+               default=instance.data["folderPath"],
+               description="AYON folder path for this job",
+            )
+            template_param_names.add("ayon:folderPath")
+        if "ayon:taskName" not in template_param_names:
+            self.add_ayon_context_parameter(
+                template_param_defs,
+                name="taskName",
+                default=instance.data["taskName"],
+                description="AYON task for this job",
+            )
+            template_param_names.add("ayon:taskName")
+        if "ayon:projectName" not in template_param_names:
+            self.add_ayon_context_parameter(
+                template_param_defs,
+                name="projectName",
+                default=instance.context.data["projectName"],
+                description="AYON project for this job",
+            )
+            template_param_names.add("ayon:projectName")
+        if "ayon:userName" not in template_param_names:
+            self.add_ayon_context_parameter(
+                template_param_defs,
+                name="userName",
+                default=instance.context.data.get("userName", ""),
+                description="AYON user name for this job",
+            )
+            template_param_names.add("ayon:userName")
+        if "ayon:hostName" not in template_param_names:
+            self.add_ayon_context_parameter(
+                template_param_defs,
+                name="hostName",
+                default=instance.context.data["hostName"],
+                description="AYON host name for this job",
+            )
+            template_param_names.add("ayon:hostName")
+        if "ayon:sourceFile" not in template_param_names:
+            self.add_ayon_context_parameter(
+                template_param_defs,
+                name="sourceFile",
+                default=instance.context.data.get("currentFile", ""),
+                description="Source file path from the host for this job",
+            )
+            template_param_names.add("ayon:sourceFile")
+        if "ayon:productBaseType" not in template_param_names:
+            self.add_ayon_context_parameter(
+                template_param_defs,
+                name="productBaseType",
+                default=instance.data.get("productBaseType", ""),
+                description="Product base type for this job",
+            )
+            template_param_names.add("ayon:productBaseType")
 
         instance_attrs = instance.data.get("creator_attributes", {})
         self._apply_instance_attrs(
