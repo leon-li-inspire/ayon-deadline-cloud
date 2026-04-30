@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any, Optional
 import click
 from ayon_core.addon import AYONAddon, IPluginPaths, click_wrap
 
+from ayon_deadline_cloud.api.publish import publish_content
+
 from .version import __version__
 
 if TYPE_CHECKING:
@@ -74,10 +76,11 @@ class DeadlineCloudAddon(AYONAddon, IPluginPaths):
 
     def _publish(  # noqa: PLR0913, PLR0917
             self,
+            path: str,
             folder_path: str,
             project_name: str,
             user_name: str,
-            product_base_name: str,
+            product_base_type: str,
             task_name: Optional[str],
             host_name: Optional[str],
             source_file: Optional[str],
@@ -85,11 +88,16 @@ class DeadlineCloudAddon(AYONAddon, IPluginPaths):
         """Publish the result of a Deadline Cloud processed job.
 
         Args:
-            folder_path: Path to the folder containing the job
+            path: Path to the folder containing the job
                 result to publish.
+            folder_path: Folder path for the context on AYON.
             project_name: Name of the project associated with the job result.
             user_name: Name of the user who submitted the job.
-            product_base_name: Base name of the product to publish.
+            product_base_type: Base name of the product to publish.
+                Note that currently it is overridden down the line
+                with hardcoded `render` - in the future, product base type
+                should be passed correctly to support other publish
+                types.
             task_name: Optional name of the task associated with
                 the job result.
             host_name: Optional name of the host application associated with
@@ -109,10 +117,18 @@ class DeadlineCloudAddon(AYONAddon, IPluginPaths):
             "user_name=%s, product_base_name=%s, task_name=%s, "
             "host_name=%s, source_file=%s",
             folder_path, project_name, user_name,
-            product_base_name, task_name, host_name, source_file
+            product_base_type, task_name, host_name, source_file
         )
-        msg = "Publishing Deadline Cloud jobs is not yet implemented."
-        raise NotImplementedError(msg)
+
+        publish_content(
+            path=path,
+            project_name=project_name,
+            folder_path=folder_path,
+            user_name=user_name,
+            task_name=task_name,
+            host_name=host_name,
+            source_file=source_file,
+        )
 
     def _cli_main(self) -> None:
         """Add CLI commands to this addon."""
@@ -162,7 +178,7 @@ class DeadlineCloudAddon(AYONAddon, IPluginPaths):
             type=click.STRING,
             required=False,
         ).option(
-            "--product-base-name",
+            "--product-base-type",
             type=click.STRING,
             required=True
         ).option(

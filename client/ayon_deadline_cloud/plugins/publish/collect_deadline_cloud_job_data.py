@@ -61,9 +61,8 @@ class CollectDeadlineCloudJobData(
 
         """
         param = {
-               "name": f"ayon:{name}",
+               "name": f"{name}",
                "type": "STRING",
-               "dataFlow": "OUT",
                "userInterface": {
                    "control": "HIDDEN",
                },
@@ -95,7 +94,7 @@ class CollectDeadlineCloudJobData(
             )
         ]
 
-    def process(self, instance: pyblish.api.Instance) -> None:
+    def process(self, instance: pyblish.api.Instance) -> None:  # noqa: PLR0915
         """Collect job data from Deadline Submitter UI.
 
         Args:
@@ -121,62 +120,87 @@ class CollectDeadlineCloudJobData(
             p["name"] for p in job_template.get("parameterDefinitions", [])
         }
         # inject AYON context and other data used by the publishing step
-        if "ayon:folderPath" not in template_param_names:
+        if "folderPath" not in template_param_names:
             self.add_ayon_context_parameter(
                template_param_defs,
                name="folderPath",
                default=instance.data["folderPath"],
                description="AYON folder path for this job",
             )
-            template_param_names.add("ayon:folderPath")
-        if "ayon:taskName" not in template_param_names:
+            template_param_names.add("folderPath")
+            self.log.debug(
+                "adding folder path: %s", instance.data["folderPath"])
+        if "taskName" not in template_param_names:
             self.add_ayon_context_parameter(
                 template_param_defs,
                 name="taskName",
-                default=instance.data["taskName"],
+                default=instance.data["task"],
                 description="AYON task for this job",
             )
-            template_param_names.add("ayon:taskName")
-        if "ayon:projectName" not in template_param_names:
+            template_param_names.add("taskName")
+            self.log.debug(
+                "adding task name: %s", instance.data["task"]
+            )
+        if "projectName" not in template_param_names:
             self.add_ayon_context_parameter(
                 template_param_defs,
                 name="projectName",
                 default=instance.context.data["projectName"],
                 description="AYON project for this job",
             )
-            template_param_names.add("ayon:projectName")
-        if "ayon:userName" not in template_param_names:
+            template_param_names.add("projectName")
+            self.log.debug(
+                "adding project name: %s",
+                instance.context.data["projectName"]
+            )
+        if "userName" not in template_param_names:
             self.add_ayon_context_parameter(
                 template_param_defs,
                 name="userName",
-                default=instance.context.data.get("userName", ""),
+                default=instance.context.data["user"],
                 description="AYON user name for this job",
             )
-            template_param_names.add("ayon:userName")
-        if "ayon:hostName" not in template_param_names:
+            template_param_names.add("userName")
+            self.log.debug(
+                "adding user name: %s",
+                instance.context.data["user"]
+            )
+        if "hostName" not in template_param_names:
             self.add_ayon_context_parameter(
                 template_param_defs,
                 name="hostName",
                 default=instance.context.data["hostName"],
                 description="AYON host name for this job",
             )
-            template_param_names.add("ayon:hostName")
-        if "ayon:sourceFile" not in template_param_names:
+            template_param_names.add("hostName")
+            self.log.debug(
+                "adding host name: %s",
+                instance.context.data["hostName"]
+            )
+        if "sourceFile" not in template_param_names:
             self.add_ayon_context_parameter(
                 template_param_defs,
                 name="sourceFile",
                 default=instance.context.data.get("currentFile", ""),
                 description="Source file path from the host for this job",
             )
-            template_param_names.add("ayon:sourceFile")
-        if "ayon:productBaseType" not in template_param_names:
+            template_param_names.add("sourceFile")
+            self.log.debug(
+                "adding source file: %s",
+                instance.context.data.get("currentFile", "")
+            )
+        if "productBaseType" not in template_param_names:
             self.add_ayon_context_parameter(
                 template_param_defs,
                 name="productBaseType",
                 default=instance.data.get("productBaseType", ""),
                 description="Product base type for this job",
             )
-            template_param_names.add("ayon:productBaseType")
+            template_param_names.add("productBaseType")
+            self.log.debug(
+                "adding product base type: %s",
+                instance.data.get("productBaseType", "")
+            )
 
         instance_attrs = instance.data.get("creator_attributes", {})
         self._apply_instance_attrs(

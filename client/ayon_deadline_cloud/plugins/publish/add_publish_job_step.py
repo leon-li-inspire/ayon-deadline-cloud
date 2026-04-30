@@ -15,6 +15,7 @@ on the previous rendering steps.
 """
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import pyblish.api
@@ -45,10 +46,17 @@ class AddPublishingStep(pyblish.api.InstancePlugin):
         """
         ayon_settings = instance.context.data.get("project_settings", {})
         dc_settings = ayon_settings.get("deadline_cloud", {})
-        render_roles: str = dc_settings.get(
+        render_roles: list[str] = dc_settings.get(
             "render_host_requirement_roles", ["render"])
-        publish_roles: str = dc_settings.get(
+        publish_roles: list[str] = dc_settings.get(
             "publish_host_requirement_roles", ["publish"])
+
+        self.log.debug(
+            "Adding render roles '%s' and "
+            "publish roles '%s' to the job template",
+            render_roles,
+            publish_roles,
+        )
 
         job_template = instance.data["deadline_cloud_job_data"]["job_template"]
         try:
@@ -61,7 +69,7 @@ class AddPublishingStep(pyblish.api.InstancePlugin):
         self._add_publishing_step(publish_roles, steps)
 
     def _add_render_roles_to_steps(
-            self, render_roles: str, steps: list[dict]) -> None:
+            self, render_roles: list[str], steps: list[dict]) -> None:
         """Add render roles to steps.
 
         This method adds `render_roles` to the render steps in the
@@ -70,7 +78,7 @@ class AddPublishingStep(pyblish.api.InstancePlugin):
         this has to run before adding publishing step.
 
         Args:
-            render_roles (str): The render role names.
+            render_roles (list[str]): The render role names.
             steps (list): Steps.
 
         """
@@ -83,12 +91,12 @@ class AddPublishingStep(pyblish.api.InstancePlugin):
         for step in steps:
             host_requirements = step.get("hostRequirements")
             if host_requirements is None:
-                continue
+                host_requirements = step["hostRequirements"] = {}
             attributes: list[dict[str, Any]] = host_requirements.get(
-                "attributes"
+                "attributes", []
             )
-            if not isinstance(attributes, list):
-                continue
+            if not attributes:
+                host_requirements["attributes"] = attributes
             if not any(
                     a.get("name") == render_role_attr["name"]
                     and a.get("anyOf") == render_role_attr["anyOf"]
@@ -100,7 +108,7 @@ class AddPublishingStep(pyblish.api.InstancePlugin):
 
     @staticmethod
     def _add_publishing_step(
-            publish_role: str,
+            publish_role: list[str],
             steps: list[dict]) -> None:
         """Add publishing step to the job template.
 
@@ -117,10 +125,27 @@ class AddPublishingStep(pyblish.api.InstancePlugin):
                 {"dependsOn": name} for name in render_step_names
             ],
             "hostRequirements": {
-                "attributes": [
-                    {"name": "attr.role", "anyOf": [publish_role]}
-                ]
+                "attributes": [{"name": "attr.role", "anyOf": publish_role}]
             },
+            "stepEnvironments": [
+                {
+                    "name": "CondaEnv",
+                    "description": "Set to disable conda",
+                    "variables": {
+                        "DISABLE_CONDA_ENV": "true",
+                    },
+                },
+                {
+                    "name": "AYONEnv",
+                    "description": "Set AYON env",
+                    "variables": {
+                        "AYON_STUDIO_BUNDLE_NAME": (
+                            os.environ["AYON_STUDIO_BUNDLE_NAME"]
+                        ),
+                        "AYON_BUNDLE_NAME": os.environ["AYON_BUNDLE_NAME"],
+                    },
+                },
+            ],
             "script": {
                 "embeddedFiles": [
                     {
@@ -133,13 +158,15 @@ set -xeuo pipefail
 
 echo "Running publish step for AYON Deadline Cloud addon..."
 ayon addon deadline_cloud publish \
- --folder "{{Param.ayon:folderPath}}" \
- --task-name "{{Param.ayon:taskName}}" \
- --project-name "{{Param.ayon:projectName}}" \
- --user-name "{{Param.ayon:userName}}" \
- --host-name "{{Param.ayon:hostName}}" \
+ --folder "{{Param.folderPath}}" \
+ --task-name "{{Param.taskName}}" \
+ --project-name "{{Param.projectName}}" \
+ --user-name "{{Param.userName}}" \
+ --host-name "{{Param.hostName}}" \
+ --product-base-type "{{Param.productBaseType}}" \
+ --source-file "{{Param.sourceFile}}" \
  "{{Param.OutputFilePath}}"
-                        """
+                        """,
                     }
                 ],
                 "actions": {
@@ -147,10 +174,10 @@ ayon addon deadline_cloud publish \
                         "command": "bash",
                         "args": [
                             "{{Task.File.Publish}}",
-                        ]
+                        ],
                     }
-                }
-            }
+                },
+            },
         }
 
         steps.append(publishing_step)
