@@ -189,7 +189,7 @@ class DeadlineCloudAddon(AYONAddon, IPluginPaths):
 
         cli_main.argument(
             "path",
-            nargs="1",
+            nargs=1,
             type=click.Path(exists=True, file_okay=False, dir_okay=True),
         )
 
