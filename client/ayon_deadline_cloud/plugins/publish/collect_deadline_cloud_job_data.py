@@ -10,15 +10,10 @@ from ayon_core.lib import TextDef
 from ayon_core.pipeline import get_current_host_name
 from ayon_core.pipeline.publish import AYONPyblishPluginMixin
 from ayon_deadline_cloud.api import auto_detect_conda_packages
+from ayon_deadline_cloud.api.submitter_bridge import get_submitter_bridge
 from deadline import client
 from deadline.client.job_bundle.submission import AssetReferences
-from deadline.maya_submitter.data_classes import RenderSubmitterUISettings
-from deadline.maya_submitter.maya_render_submitter import (
-    get_asset_references_for_submission,
-    get_job_template_for_submission,
-    get_parameter_values_for_submission,
-    get_queue_parameters,
-)
+
 
 if TYPE_CHECKING:
     from logging import Logger
@@ -72,13 +67,20 @@ class CollectDeadlineCloudJobData(
         """
         ayon_settings = instance.context.data.get("project_settings", {})
         dc_settings = ayon_settings.get("deadline_cloud", {})
-        settings = RenderSubmitterUISettings()
-        queue_parameters: list[dict[str, Any]] = get_queue_parameters()
+        submitter_bg = get_submitter_bridge(
+            host_name=instance.context.data["host_name"],
+            instance=instance,
+        )
+        settings = submitter_bg.submitter_settings
+        queue_parameters: list[dict[str, Any]] = (
+            submitter_bg.get_queue_parameters()
+        )
         attr_values = self.get_attr_values_from_data(instance.data)
 
         job_template = self._build_job_template(settings, instance)
-        parameter_values = get_parameter_values_for_submission(
-            settings, queue_parameters)
+        parameter_values = submitter_bg.get_parameter_values_for_submission(
+            settings, queue_parameters
+        )
         pv_by_name: dict[str, dict] = {
             pv["name"]: pv for pv in parameter_values
         }
@@ -103,7 +105,9 @@ class CollectDeadlineCloudJobData(
             input_directories=set(settings.input_directories),
             output_directories=set(settings.output_directories),
         )
-        asset_refs_dict = get_asset_references_for_submission(asset_references)
+        asset_refs_dict = submitter_bg.get_asset_references_for_submission(
+            asset_references
+        )
 
         instance.data["deadline_cloud_job_data"] = {
             "job_template": job_template,
@@ -123,20 +127,24 @@ class CollectDeadlineCloudJobData(
 
     @staticmethod
     def _build_job_template(
-        settings: RenderSubmitterUISettings,
+        settings: Any,  # noqa: ANN401
         instance: pyblish.api.Instance,
     ) -> dict[str, Any]:
         """Build and return the job template, ensuring it has a name.
 
         Args:
-            settings: Render submitter UI settings.
+            settings: Render submitter settings.
             instance: Pyblish instance (used to derive a fallback job name).
 
         Returns:
             Job template dict.
 
         """
-        job_template = get_job_template_for_submission(settings)
+        submitter_bg = get_submitter_bridge(
+            host_name=instance.context.data["host_name"],
+            instance=instance,
+        )
+        job_template = submitter_bg.get_job_template_for_submission(settings)
         if not job_template.get("name"):
             src_file: str = instance.context.data.get("currentFile", "")
             basename = os.path.basename(src_file) if src_file else ""
@@ -244,7 +252,7 @@ class CollectDeadlineCloudJobData(
 
     def _build_submitter_settings(
         self,
-        settings: RenderSubmitterUISettings,
+        settings: Any,  # noqa: ANN401
         dc_settings: dict[str, Any],
         queue_parameters: list[dict[str, Any]],
     ) -> dict[str, Any]:
@@ -253,7 +261,7 @@ class CollectDeadlineCloudJobData(
         AYON project/studio settings can override farm_id and queue_id.
 
         Args:
-            settings: Render submitter UI settings.
+            settings: Render submitter settings.
             dc_settings: Deadline Cloud AYON settings dict.
             queue_parameters: Queue parameters retrieved from Deadline Cloud.
 
