@@ -11,6 +11,9 @@ with contextlib.suppress(ImportError):
 class HoudiniSetting:
     """Data class for Houdini settings."""
     rop_node: hou.Node = None
+    input_filenames: set[str] = None
+    output_directories: set[str] = None
+    input_directories: set[str] = None
 
 
 @dataclass
@@ -59,18 +62,33 @@ def get_submitter_bridge(
     if host_name == "houdini":
         import hou  # type: ignore  # noqa: PGH003
         from deadline_cloud_for_houdini.submitter import (
+            get_asset_references_for_submission,
             get_job_template_for_submission,
             get_parameter_values_for_submission,
             get_queue_parameters,
+
         )
         settings = HoudiniSetting()
-        settings.rop_node = hou.node(instance.data.get("instance_node"))
+        rop_node = hou.node(instance.data.get("instance_node"))
+        settings.rop_node = rop_node
+        settings.input_filenames = {
+            n.unexpandedString() for n in
+            rop_node.parm("input_filenames").multiParmInstances()
+        }
+        settings.input_directories = {
+            n.unexpandedString() for n in
+            rop_node.parm("input_directories").multiParmInstances()
+        }
+        settings.output_directories = {
+            n.unexpandedString() for n in
+            rop_node.parm("output_directories").multiParmInstances()
+        }
         return SubmitterBridge(
             submitter_settings=settings,
             get_job_template_for_submission=get_job_template_for_submission,
             get_parameter_values_for_submission=get_parameter_values_for_submission,
             get_queue_parameters=get_queue_parameters,
-            get_asset_references_for_submission=None,
+            get_asset_references_for_submission=get_asset_references_for_submission,
         )
 
     msg = f"Unsupported host: {host_name}"
