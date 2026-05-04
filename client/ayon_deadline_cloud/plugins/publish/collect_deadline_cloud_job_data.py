@@ -17,7 +17,6 @@ from ayon_deadline_cloud.api.submitter_bridge import (
 from deadline import client
 from deadline.client.job_bundle.submission import AssetReferences
 
-
 if TYPE_CHECKING:
     from logging import Logger
 

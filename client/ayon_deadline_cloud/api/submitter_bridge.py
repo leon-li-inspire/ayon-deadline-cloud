@@ -1,8 +1,10 @@
 """Data classes for settings across the hosts."""
-from dataclasses import dataclass
 import contextlib
-import pyblish.api
+from dataclasses import dataclass
 from typing import Any, Callable
+
+import pyblish.api
+
 with contextlib.suppress(ImportError):
     import hou
 
@@ -66,7 +68,6 @@ def get_submitter_bridge(
             get_job_template_for_submission,
             get_parameter_values_for_submission,
             get_queue_parameters,
-
         )
         settings = HoudiniSetting()
         rop_node = hou.node(instance.data.get("instance_node"))

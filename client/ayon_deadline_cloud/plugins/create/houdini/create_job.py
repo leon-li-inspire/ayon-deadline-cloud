@@ -3,18 +3,17 @@ from __future__ import annotations
 
 from typing import Any, Type
 
+import hou
+import pyblish.api
 from ayon_core.lib import (
     AbstractAttrDef,
-    BoolDef,
     NumberDef,
     TextDef,
 )
 from ayon_core.pipeline import CreatedInstance
+from ayon_deadline_cloud.api.submitter_bridge import HoudiniSetting
 from ayon_houdini.api import plugin
 from ayon_houdini.api.lib import read
-from ayon_deadline_cloud.api.submitter_bridge import HoudiniSetting
-
-import hou
 
 
 class CreateDeadlineCloudJob(plugin.HoudiniCreator):
@@ -62,8 +61,20 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
         return instance
 
     def set_node_staging_dir(
-            self, node, staging_dir, instance, pre_create_data):
-        pass
+            self,
+            node: hou.Node,
+            staging_dir: str,
+            instance: pyblish.api.Instance,
+            pre_create_data: dict
+    ) -> None:
+        """Set the staging directory for the given node.
+
+        Args:
+            node (hou.Node): node to set staging dir on
+            staging_dir (str): staging directory path
+            instance (pyblish.api.Instance): Pyblish instance
+            pre_create_data (dict): pre-create data
+        """
 
     def _load_job_data(
             self,
