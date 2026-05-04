@@ -69,7 +69,7 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
             list[Type[AbstractAttrDef]]
 
         """
-        from deadline.houdini_submitter.python.deadline_cloud_for_houdini.submitter import (
+        from deadline_cloud_for_houdini.submitter import (
             get_job_template_for_submission,
             get_parameter_values_for_submission,
             get_queue_parameters,
