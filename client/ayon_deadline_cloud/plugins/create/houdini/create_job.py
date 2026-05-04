@@ -172,6 +172,15 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
                 )
         return out
 
+    def get_pre_create_attr_defs(self) -> list[Type[AbstractAttrDef]]:  # noqa: PLR6301
+        """Get attribute definitions for pre-create step.
+
+        Returns:
+            list[Type[AbstractAttrDef]]: List of attribute definitions for
+                pre-create step
+        """
+        return []
+
     def get_attr_defs_for_instance(
             self,
             instance: CreatedInstance
