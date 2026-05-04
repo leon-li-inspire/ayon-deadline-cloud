@@ -143,23 +143,14 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
             self.log.debug("%s(%s): %s",
                            label, param_def["name"], value)
             if param_def["type"] in {"STRING", "PATH"}:
-                if param_def["userInterface"]["control"] == "CHECK_BOX":
-                    out.append(
-                        BoolDef(
-                            label=label,
-                            key=param_def["name"],
-                            default=bool(value == "true"),
-                        )
+                out.append(
+                    TextDef(
+                        label=label,
+                        key=param_def["name"],
+                        default=value,
+                        multiline=False,
                     )
-                else:
-                    out.append(
-                        TextDef(
-                            label=label,
-                            key=param_def["name"],
-                            default=value,
-                            multiline=False,
-                        )
-                    )
+                )
             elif param_def["type"] == "INT":
                 out.append(
                     NumberDef(
