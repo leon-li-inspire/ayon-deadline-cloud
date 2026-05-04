@@ -58,7 +58,6 @@ def get_submitter_bridge(
 
     if host_name == "houdini":
         import hou  # type: ignore  # noqa: PGH003
-        from ayon_houdini.settings import HoudiniSetting
         from deadline_cloud_for_houdini.submitter import (
             get_job_template_for_submission,
             get_parameter_values_for_submission,

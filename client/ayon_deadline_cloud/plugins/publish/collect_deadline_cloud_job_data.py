@@ -33,7 +33,7 @@ class CollectDeadlineCloudJobData(
     # this could be used in the future for other hosts, but
     # we would have to move any calls with deadline.maya_submitter
     # to library.
-    hosts: ClassVar[list[str]] = ["maya"]
+    hosts: ClassVar[list[str]] = ["maya", "houdini"]
     log: Logger
 
     @classmethod
@@ -68,7 +68,7 @@ class CollectDeadlineCloudJobData(
         ayon_settings = instance.context.data.get("project_settings", {})
         dc_settings = ayon_settings.get("deadline_cloud", {})
         submitter_bg = get_submitter_bridge(
-            host_name=instance.context.data["host_name"],
+            host_name=instance.context.data["hostName"],
             instance=instance,
         )
         settings = submitter_bg.submitter_settings
