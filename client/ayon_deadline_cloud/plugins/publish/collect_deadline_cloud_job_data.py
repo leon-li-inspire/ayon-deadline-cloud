@@ -68,7 +68,7 @@ class CollectDeadlineCloudJobData(
         ayon_settings = instance.context.data.get("project_settings", {})
         dc_settings = ayon_settings.get("deadline_cloud", {})
         submitter_bg = get_submitter_bridge(
-            host_name=get_current_host_name,
+            host_name=get_current_host_name(),
             instance=instance,
         )
         settings = submitter_bg.submitter_settings
