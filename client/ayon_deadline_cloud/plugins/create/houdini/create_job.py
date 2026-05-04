@@ -11,6 +11,7 @@ from ayon_core.lib import (
 )
 from ayon_core.pipeline import CreatedInstance
 from ayon_houdini.api import plugin
+from ayon_houdini.api.lib import read
 from ayon_deadline_cloud.api.submitter_bridge import HoudiniSetting
 
 import hou
@@ -48,10 +49,21 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
         instance_data.update({"node_type": "deadline_cloud"})
         instance = super().create(product_name, instance_data, pre_create_data)
         instance_node = hou.node(instance.get("instance_node"))
+        if instance_node is None:
+            self.log.warning(
+                "Could not lock parameters for instance '%s' because node does "
+                "not exist.",
+                instance.get("instance_node"),
+            )
+            return instance
         # Lock any parameters in this list
         to_lock = ["productType", "productBaseType", "id"]
         self.lock_parameters(instance_node, to_lock)
         return instance
+
+    def set_node_staging_dir(
+            self, node, staging_dir, instance, pre_create_data):
+        pass
 
     def _load_job_data(
             self,
@@ -76,24 +88,48 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
         )
         # TODO: need to figure out how to store the data
         settings = HoudiniSetting()
-        settings.rop_node = hou.node(instance.get("instance_node"))
+        instance_node_path = instance.get("instance_node")
+        rop_node = hou.node(instance_node_path) if instance_node_path else None
+        if rop_node is None:
+            self.log.warning(
+                "Skipping Deadline Cloud job data load; instance node was not "
+                "found: %s",
+                instance_node_path,
+            )
+            return []
+
+        settings.rop_node = rop_node
         queue_parameters: list[dict[str, Any]] = get_queue_parameters()
 
         # this would be 'job_bundle/template.yaml'
         job_template = get_job_template_for_submission(settings)
         # this would be 'job_bundle/parameter_values.yaml'
-        parameter_values = get_parameter_values_for_submission(
+        parameter_values_payload = get_parameter_values_for_submission(
             settings, queue_parameters)
 
+        if isinstance(parameter_values_payload, dict):
+            parameter_values = parameter_values_payload.get("parameterValues")
+        else:
+            parameter_values = parameter_values_payload
+
+        if not isinstance(parameter_values, list):
+            self.log.warning(
+                "Unexpected parameter values payload type: %s",
+                type(parameter_values_payload).__name__,
+            )
+            parameter_values = []
+
         parameter_values_dict = {
-            i["name"]: i["value"]
-            for i in parameter_values
+            item["name"]: item["value"]
+            for item in parameter_values
+            if isinstance(item, dict)
+            and "name" in item
+            and "value" in item
         }
 
         out = []
 
         for param_def in job_template["parameterDefinitions"]:
-
             try:
                 value = parameter_values_dict[param_def["name"]]
             except KeyError:
@@ -154,7 +190,7 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
         """Collect instances."""
         super().collect_instances()
         collected_nodes = {
-            created_instance.get("instance_node")
+            hou.node(created_instance.get("instance_node"))
             for created_instance in self.create_context.instances
         }
         collected_nodes.discard(None)
@@ -176,7 +212,7 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
             self.log.info("Found unregistered render output node: %s",
                           variant
             )
-            instance_data = self.read(node)
+            instance_data = read(node)
             product_type = instance_data.get("productType")
             if not product_type:
                 product_type = self.product_base_type
@@ -195,6 +231,8 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
                 "task": task_entity["name"],
                 "productName": product_name,
                 "variant": variant,
+                "instance_id": node.path(),
+                "families": self.get_publish_families(),
             })
 
             instance = CreatedInstance(
@@ -204,7 +242,7 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
                 data=instance_data,
                 creator=self,
                 transient_data={
-                    "instance_node": node
+                    "instance_node": node.path(),
                 }
             )
             self._add_instance_to_context(instance)
