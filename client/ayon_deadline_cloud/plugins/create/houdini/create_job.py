@@ -1,10 +1,9 @@
 """Create Deadline Cloud Job."""
 from __future__ import annotations
 
-from typing import Any, Type
+from typing import TYPE_CHECKING, Any, Type
 
 import hou
-import pyblish.api
 from ayon_core.lib import (
     AbstractAttrDef,
     NumberDef,
@@ -14,6 +13,9 @@ from ayon_core.pipeline import CreatedInstance
 from ayon_deadline_cloud.api.submitter_bridge import HoudiniSetting
 from ayon_houdini.api import plugin
 from ayon_houdini.api.lib import read
+
+if TYPE_CHECKING:
+    import pyblish.api
 
 
 class CreateDeadlineCloudJob(plugin.HoudiniCreator):
@@ -50,8 +52,8 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
         instance_node = hou.node(instance.get("instance_node"))
         if instance_node is None:
             self.log.warning(
-                "Could not lock parameters for instance '%s' because node does "
-                "not exist.",
+                "Could not lock parameters for instance '%s' because "
+                "node does not exist.",
                 instance.get("instance_node"),
             )
             return instance
@@ -97,7 +99,6 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
             get_parameter_values_for_submission,
             get_queue_parameters,
         )
-        # TODO: need to figure out how to store the data
         settings = HoudiniSetting()
         instance_node_path = instance.get("instance_node")
         rop_node = hou.node(instance_node_path) if instance_node_path else None
