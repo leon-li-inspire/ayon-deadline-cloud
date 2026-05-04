@@ -10,7 +10,10 @@ from ayon_core.lib import TextDef
 from ayon_core.pipeline import get_current_host_name
 from ayon_core.pipeline.publish import AYONPyblishPluginMixin
 from ayon_deadline_cloud.api import auto_detect_conda_packages
-from ayon_deadline_cloud.api.submitter_bridge import get_submitter_bridge
+from ayon_deadline_cloud.api.submitter_bridge import (
+    HoudiniSetting,
+    get_submitter_bridge,
+)
 from deadline import client
 from deadline.client.job_bundle.submission import AssetReferences
 
@@ -286,10 +289,23 @@ class CollectDeadlineCloudJobData(
                 queue_id_override)
             queue_id = queue_id_override
 
+        if isinstance(settings, HoudiniSetting):
+            render_settings = {
+                field.name: getattr(settings, field.name)
+                for field in dataclasses.fields(settings)
+                if field.name != "rop_node"
+            }
+            if settings.rop_node is not None:
+                render_settings["rop_node"] = settings.rop_node.path()
+            else:
+                render_settings["rop_node"] = None
+        else:
+            render_settings = dataclasses.asdict(settings)
+
         return {
             "profile_name": profile_name,
             "default_farm_id": farm_id,
             "queue_id": queue_id,
             "queue_parameters": queue_parameters,
-            "render_settings": dataclasses.asdict(settings),
+            "render_settings": render_settings,
         }
