@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Type
 import hou
 from ayon_core.lib import (
     AbstractAttrDef,
+    BoolDef,
     NumberDef,
     TextDef,
 )
@@ -155,14 +156,23 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
             self.log.debug("%s(%s): %s",
                            label, param_def["name"], value)
             if param_def["type"] in {"STRING", "PATH"}:
-                out.append(
-                    TextDef(
-                        label=label,
-                        key=param_def["name"],
-                        default=value,
-                        multiline=False,
+                if param_def.get("userInterface", {}).get("control") == "CHECK_BOX":  # noqa: E501
+                    out.append(
+                        BoolDef(
+                            label=label,
+                            key=param_def["name"],
+                            default=bool(value == "true"),
+                        )
                     )
-                )
+                else:
+                    out.append(
+                        TextDef(
+                            label=label,
+                            key=param_def["name"],
+                            default=value,
+                            multiline=False,
+                        )
+                    )
             elif param_def["type"] == "INT":
                 out.append(
                     NumberDef(
