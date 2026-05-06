@@ -12,7 +12,7 @@ with contextlib.suppress(ImportError):
 @dataclass
 class HoudiniSetting:
     """Data class for Houdini settings."""
-    rop_node: hou.Node = None
+    rop_node: Any = None
     input_filenames: set[str] = None
     output_directories: set[str] = None
     input_directories: set[str] = None
@@ -62,7 +62,6 @@ def get_submitter_bridge(
         )
 
     if host_name == "houdini":
-        import hou  # type: ignore  # noqa: PGH003
         from deadline_cloud_for_houdini.submitter import (
             get_asset_references_for_submission,
             get_job_template_for_submission,
