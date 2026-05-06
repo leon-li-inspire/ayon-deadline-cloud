@@ -1,18 +1,14 @@
 """Data classes for settings across the hosts."""
-import contextlib
 from dataclasses import dataclass
 from typing import Any, Callable
 
 import pyblish.api
 
-with contextlib.suppress(ImportError):
-    import hou
-
 
 @dataclass
 class HoudiniSetting:
     """Data class for Houdini settings."""
-    rop_node: hou.Node = None
+    rop_node: Any = None
     input_filenames: set[str] = None
     output_directories: set[str] = None
     input_directories: set[str] = None
