@@ -76,7 +76,7 @@ class SubmitToDeadlineCloud(pyblish.api.InstancePlugin):
                 "job_bundle_dir": temp_dir,
                 "print_function_callback": self.log.info,
             }
-            if known_paths:
+            if instance.context.data["hostName"] == "maya":
                 kwargs["known_asset_paths"] = known_paths
                 kwargs["interactive_confirmation_callback"] = (
                     lambda _msg, _default: True
