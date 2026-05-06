@@ -102,25 +102,25 @@ class CreateBackdrop(NukeCreator):
             self.log.debug("%s(%s): %s",
                            label, param_def["name"], value)
             if param_def["type"] in {"STRING", "PATH"}:
-                if param_def.get("userInterface", {}):
-                    if param_def["userInterface"]["control"] == "CHECK_BOX":
-                        out.append(
-                            BoolDef(
-                                label=label,
-                                key=param_def["name"],
-                                default=bool(value == "true"),
-                            )
+                control = param_def.get("userInterface", {}).get("control", "")
+                if control == "CHECK_BOX":
+                    out.append(
+                        BoolDef(
+                            label=label,
+                            key=param_def["name"],
+                            default=bool(value == "true"),
                         )
-                    if param_def["userInterface"]["control"] == "DROPDOWN_LIST":  # noqa: E501
-                        out.append(
-                            EnumDef(
-                                label=label,
-                                key=param_def["name"],
-                                items=param_def["allowedValues"],
-                                default=value,
-                                multiselection=True,
-                            )
+                    )
+                elif control == "DROPDOWN_LIST":
+                    out.append(
+                        EnumDef(
+                            label=label,
+                            key=param_def["name"],
+                            items=param_def["allowedValues"],
+                            default=value,
+                            multiselection=True,
                         )
+                    )
                 else:
                     out.append(
                         TextDef(
