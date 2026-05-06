@@ -1,12 +1,8 @@
 """Data classes for settings across the hosts."""
-import contextlib
 from dataclasses import dataclass
 from typing import Any, Callable
 
 import pyblish.api
-
-with contextlib.suppress(ImportError):
-    import hou
 
 
 @dataclass
@@ -62,6 +58,7 @@ def get_submitter_bridge(
         )
 
     if host_name == "houdini":
+        import hou
         from deadline_cloud_for_houdini.submitter import (
             get_asset_references_for_submission,
             get_job_template_for_submission,
