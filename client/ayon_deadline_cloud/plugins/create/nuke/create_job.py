@@ -11,47 +11,18 @@ from ayon_core.lib import (
     TextDef,
     EnumDef,
 )
-from ayon_nuke.api import NukeCreator, maintained_selection
+from ayon_nuke.api import NukeCreator
 
 
-class CreateBackdrop(NukeCreator):
+class CreateDeadlineCloudJob(NukeCreator):
     """Creator plugin to create a backdrop node representing
     Deadline Cloud Job instance.
     """  # noqa: D205
-    identifier = "io.ayon.create.deadline_cloud_job"
+    identifier = "deadline_cloud_job"
     label = "Deadline Cloud Render Job"
     product_base_type = "deadline_cloud"
     product_type = product_base_type
     icon = "cube"
-
-    # plugin attributes
-    node_color = "0xdfea5dff"
-
-    def create_instance_node(
-        self,
-        node_name: str,
-        knobs: dict | None = None,
-        parent: str | None = None,
-        node_type: str | None = None,
-        node_selection: list | None = None,
-    ) -> nuke.Node:
-        """Create node representing instance.
-
-        Arguments:
-            node_name (str): Name of the new node.
-            knobs (dict | None): node knobs name and values
-            parent (str | None): Name of the parent node.
-            node_type (str | None, optional): Nuke node Class.
-            node_selection (list | None): The node selection.
-
-        Returns:
-            nuke.Node: Newly created instance node.
-        """
-        with maintained_selection():
-            op_node = nuke.createNode("NoOp")
-            op_node["tile_color"].setValue(int(self.node_color, 16))
-            op_node.setName(node_name)
-            return op_node
 
     def _load_job_data(self) -> list[Type[AbstractAttrDef]]:
         """Load job template and parameters.
@@ -148,3 +119,12 @@ class CreateBackdrop(NukeCreator):
 
         """
         return self._load_job_data()
+
+    def get_pre_create_attr_defs(self) -> list[Type[AbstractAttrDef]]:  # noqa: PLR6301
+        """Get attribute definitions for pre-create step.
+
+        Returns:
+            list[Type[AbstractAttrDef]]: List of attribute definitions for
+                pre-create step
+        """
+        return []
