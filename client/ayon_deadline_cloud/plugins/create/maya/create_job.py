@@ -165,8 +165,7 @@ class CreateDeadlineCloudJob(plugin.MayaCreator):
             The current work directory path, or empty string on failure.
 
         """
-        context = get_current_context()
-        work_dir = context.get("work_dir", "")
+        work_dir = os.getenv("AYON_WORKDIR", "")
         if work_dir:
             return work_dir
 
