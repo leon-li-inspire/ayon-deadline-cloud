@@ -72,12 +72,16 @@ class SubmitToDeadlineCloud(pyblish.api.InstancePlugin):
                     indent=1
                 )
             self.log.info("Submitting job bundle to AWS Deadline Cloud...")
-            job_id = create_job_from_job_bundle(
-                job_bundle_dir=temp_dir,
-                known_asset_paths=known_paths,
-                interactive_confirmation_callback=lambda _msg, _default: True,
-                print_function_callback=self.log.info,
-            )
+            kwargs = {
+                "job_bundle_dir": temp_dir,
+                "print_function_callback": self.log.info,
+            }
+            if instance.context.data["hostName"] != "houdini":
+                kwargs["known_asset_paths"] = known_paths
+                kwargs["interactive_confirmation_callback"] = (
+                    lambda _msg, _default: True
+                )
+            job_id = create_job_from_job_bundle(**kwargs)
             self.log.info(
                 "Job submitted to AWS Deadline Cloud with ID: %s",
                 job_id)
