@@ -3,13 +3,12 @@ from __future__ import annotations
 
 from typing import Any, Type
 
-import nuke
 from ayon_core.lib import (
     AbstractAttrDef,
     BoolDef,
+    EnumDef,
     NumberDef,
     TextDef,
-    EnumDef,
 )
 from ayon_nuke.api import NukeCreator
 
