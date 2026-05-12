@@ -10,13 +10,12 @@ from ayon_core.lib import (
     NumberDef,
     TextDef,
 )
-from ayon_core.pipeline import CreatedInstance
 from ayon_deadline_cloud.api.submitter_bridge import HoudiniSetting
 from ayon_houdini.api import plugin
-from ayon_houdini.api.lib import read
 
 if TYPE_CHECKING:
     import pyblish.api
+    from ayon_core.pipeline import CreatedInstance
 
 
 class CreateDeadlineCloudJob(plugin.HoudiniCreator):
