@@ -1,6 +1,7 @@
 """Create Deadline Cloud Job."""
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any, Type
 
 from ayon_core.lib import (
@@ -9,7 +10,6 @@ from ayon_core.lib import (
     NumberDef,
     TextDef,
 )
-from ayon_core.pipeline.context_tools import get_current_context
 from ayon_maya.api import plugin
 from deadline.maya_submitter.scene import Scene
 from maya import cmds
