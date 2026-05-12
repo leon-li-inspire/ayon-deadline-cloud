@@ -109,7 +109,7 @@ class HostCondaPackages:
             houdini_version = None
 
         # note: this is used to get the version of the adaptor, which is
-        # not necessarily the same as the Maya version. Sometimes it happens
+        # not necessarily the same as the Houdini version. Sometimes it happens
         # that the version in dev build is set incorrectly? to 0.0 and then
         # the submitted jobs will fail because that conda package can't be
         # found in the default conda channel. This simple fix will release
@@ -146,7 +146,7 @@ class HostCondaPackages:
             nuke_version = None
 
         # note: this is used to get the version of the adaptor, which is
-        # not necessarily the same as the Maya version. Sometimes it happens
+        # not necessarily the same as the Nuke version. Sometimes it happens
         # that the version in dev build is set incorrectly? to 0.0 and then
         # the submitted jobs will fail because that conda package can't be
         # found in the default conda channel. This simple fix will release
