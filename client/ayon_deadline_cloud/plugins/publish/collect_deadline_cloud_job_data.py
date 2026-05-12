@@ -205,6 +205,18 @@ class CollectDeadlineCloudJobData(
                 "adding product base type: %s",
                 instance.data.get("productBaseType", "")
             )
+        if "OutputFilePath" not in template_param_names:
+            self.add_ayon_context_parameter(
+                template_param_defs,
+                name="OutputFilePath",
+                default=instance.data.get("stagingDir", ""),
+                description="AYON output path for this job",
+            )
+            template_param_names.add("OutputFilePath")
+            self.log.debug(
+                "adding output path: %s",
+                instance.data.get("stagingDir", "")
+            )
 
         instance_attrs = instance.data.get("creator_attributes", {})
         self._apply_instance_attrs(
