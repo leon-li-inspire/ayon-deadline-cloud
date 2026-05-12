@@ -35,7 +35,7 @@ class CollectDeadlineCloudJobData(
     # this could be used in the future for other hosts, but
     # we would have to move any calls with deadline.maya_submitter
     # to library.
-    hosts: ClassVar[list[str]] = ["maya", "houdini", "nuke"]
+    hosts: ClassVar[list[str]] = ["maya", "houdini"]
     log: Logger
 
     @staticmethod
@@ -204,6 +204,18 @@ class CollectDeadlineCloudJobData(
             self.log.debug(
                 "adding product base type: %s",
                 instance.data.get("productBaseType", "")
+            )
+        if "OutputFilePath" not in template_param_names:
+            self.add_ayon_context_parameter(
+                template_param_defs,
+                name="OutputFilePath",
+                default=instance.data.get("stagingDir", ""),
+                description="AYON output path for this job",
+            )
+            template_param_names.add("OutputFilePath")
+            self.log.debug(
+                "adding output path: %s",
+                instance.data.get("stagingDir", "")
             )
 
         instance_attrs = instance.data.get("creator_attributes", {})
