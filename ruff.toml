@@ -62,7 +62,6 @@ ignore = [
     "S404",    # suspicious-subprocess-import: subprocess module can be insecure
     "PLC0415", # import-outside-top-level: import must be on top of the file
     "CPY001",  # missing-copyright-notice: missing copyright header
-
 ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
@@ -98,3 +97,7 @@ docstring-code-format = false
 # This only has an effect when the `docstring-code-format` setting is
 # enabled.
 docstring-code-line-length = "dynamic"
+
+[lint.per-file-ignores]
+# mixed case for variable names (needed by pyblish context and instance
+"client/*/api/datatypes.py" = ["N815"]
