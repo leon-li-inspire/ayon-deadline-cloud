@@ -1,6 +1,8 @@
 """Create Deadline Cloud Job."""
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any, Type
 
 from ayon_core.lib import (
@@ -92,6 +94,11 @@ class CreateDeadlineCloudJob(NukeCreator):
                         )
                     )
                 else:
+                    value = (
+                        Path(value).as_posix()
+                        if param_def["type"] == "PATH"
+                        else value
+                    )
                     out.append(
                         TextDef(
                             label=label,
