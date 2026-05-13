@@ -1,7 +1,6 @@
 """Create Deadline Cloud Job."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, Type
 
@@ -51,7 +50,6 @@ class CreateDeadlineCloudJob(NukeCreator):
         # this would be 'job_bundle/parameter_values.yaml'
         parameter_values = get_parameter_values_for_submission(
             settings, queue_parameters)
-
         parameter_values_dict = {
             i["name"]: i["value"]
             for i in parameter_values
