@@ -32,10 +32,10 @@ class CreateBlendScene(plugin.BlenderCreator):
 
         """
         from deadline_cloud_blender_submitter.template_filling import (
+            BlenderSubmitterUISettings,
             get_job_template_for_submission,
             get_parameter_values_for_submission,
             get_queue_parameters,
-            BlenderSubmitterUISettings,
         )
         settings = BlenderSubmitterUISettings()
         queue_parameters: list[dict[str, Any]] = get_queue_parameters()

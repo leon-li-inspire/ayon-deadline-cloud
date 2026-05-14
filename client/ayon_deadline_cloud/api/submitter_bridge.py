@@ -108,11 +108,11 @@ def get_submitter_bridge(
 
     if host_name == "blender":
         from deadline_cloud_blender_submitter.template_filling import (
+            BlenderSubmitterUISettings,
             get_asset_references_for_submission,
             get_job_template_for_submission,
             get_parameter_values_for_submission,
             get_queue_parameters,
-            BlenderSubmitterUISettings,
         )
         return SubmitterBridge(
             submitter_settings=BlenderSubmitterUISettings(),
