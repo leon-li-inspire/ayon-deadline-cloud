@@ -106,5 +106,21 @@ def get_submitter_bridge(
             get_asset_references_for_submission=get_asset_references_for_submission,
         )
 
+    if host_name == "blender":
+        from deadline_cloud_blender_submitter.template_filling import (
+            get_asset_references_for_submission,
+            get_job_template_for_submission,
+            get_parameter_values_for_submission,
+            get_queue_parameters,
+            BlenderSubmitterUISettings,
+        )
+        return SubmitterBridge(
+            submitter_settings=BlenderSubmitterUISettings(),
+            get_job_template_for_submission=get_job_template_for_submission,
+            get_parameter_values_for_submission=get_parameter_values_for_submission,
+            get_queue_parameters=get_queue_parameters,
+            get_asset_references_for_submission=get_asset_references_for_submission,
+        )
+
     msg = f"Unsupported host: {host_name}"
     raise NotImplementedError(msg)
