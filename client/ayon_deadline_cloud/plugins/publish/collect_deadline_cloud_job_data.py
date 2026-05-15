@@ -3,22 +3,19 @@ from __future__ import annotations
 
 import dataclasses
 import os
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Optional
 
 import pyblish.api
 from ayon_core.lib import TextDef
 from ayon_core.pipeline import get_current_host_name
 from ayon_core.pipeline.publish import AYONPyblishPluginMixin
 from ayon_deadline_cloud.api import auto_detect_conda_packages
+from ayon_deadline_cloud.api.submitter_bridge import (
+    HoudiniSetting,
+    get_submitter_bridge,
+)
 from deadline import client
 from deadline.client.job_bundle.submission import AssetReferences
-from deadline.maya_submitter.data_classes import RenderSubmitterUISettings
-from deadline.maya_submitter.maya_render_submitter import (
-    get_asset_references_for_submission,
-    get_job_template_for_submission,
-    get_parameter_values_for_submission,
-    get_queue_parameters,
-)
 
 if TYPE_CHECKING:
     from logging import Logger
@@ -38,8 +35,39 @@ class CollectDeadlineCloudJobData(
     # this could be used in the future for other hosts, but
     # we would have to move any calls with deadline.maya_submitter
     # to library.
-    hosts: ClassVar[list[str]] = ["maya"]
+    hosts: ClassVar[list[str]] = ["maya", "houdini"]
     log: Logger
+
+    @staticmethod
+    def add_ayon_context_parameter(
+            param_defs: list[dict[str, Any]],
+            name: str,
+            default: str,
+            description: Optional[str],
+    ) -> None:
+        """Add an AYON context string parameter.
+
+        Adds STRING parameter to template with AYON
+        namespace.
+
+        Args:
+            param_defs: List of parameter definitions to append to.
+            name: Name of the parameter (without namespace).
+            default: Default value for the parameter.
+            description: Optional description for the parameter.
+
+        """
+        param = {
+               "name": f"{name}",
+               "type": "STRING",
+               "userInterface": {
+                   "control": "HIDDEN",
+               },
+               "default": f"{default}",
+        }
+        if description is not None:
+            param["description"] = description
+        param_defs.append(param)
 
     @classmethod
     def get_attr_defs_for_instance(
@@ -63,7 +91,7 @@ class CollectDeadlineCloudJobData(
             )
         ]
 
-    def process(self, instance: pyblish.api.Instance) -> None:
+    def process(self, instance: pyblish.api.Instance) -> None:  # noqa: PLR0915
         """Collect job data from Deadline Submitter UI.
 
         Args:
@@ -72,19 +100,123 @@ class CollectDeadlineCloudJobData(
         """
         ayon_settings = instance.context.data.get("project_settings", {})
         dc_settings = ayon_settings.get("deadline_cloud", {})
-        settings = RenderSubmitterUISettings()
-        queue_parameters: list[dict[str, Any]] = get_queue_parameters()
+        submitter_bg = get_submitter_bridge(
+            host_name=get_current_host_name(),
+            instance=instance,
+        )
+        settings = submitter_bg.submitter_settings
+        queue_parameters: list[dict[str, Any]] = (
+            submitter_bg.get_queue_parameters()
+        )
         attr_values = self.get_attr_values_from_data(instance.data)
 
         job_template = self._build_job_template(settings, instance)
-        parameter_values = get_parameter_values_for_submission(
-            settings, queue_parameters)
+        parameter_values = submitter_bg.get_parameter_values_for_submission(
+            settings, queue_parameters
+        )
         pv_by_name: dict[str, dict] = {
             pv["name"]: pv for pv in parameter_values
         }
+
+        template_param_defs = job_template.get("parameterDefinitions", [])
+
         template_param_names = {
             p["name"] for p in job_template.get("parameterDefinitions", [])
         }
+        # inject AYON context and other data used by the publishing step
+        if "folderPath" not in template_param_names:
+            self.add_ayon_context_parameter(
+               template_param_defs,
+               name="folderPath",
+               default=instance.data["folderPath"],
+               description="AYON folder path for this job",
+            )
+            template_param_names.add("folderPath")
+            self.log.debug(
+                "adding folder path: %s", instance.data["folderPath"])
+        if "taskName" not in template_param_names:
+            self.add_ayon_context_parameter(
+                template_param_defs,
+                name="taskName",
+                default=instance.data["task"],
+                description="AYON task for this job",
+            )
+            template_param_names.add("taskName")
+            self.log.debug(
+                "adding task name: %s", instance.data["task"]
+            )
+        if "projectName" not in template_param_names:
+            self.add_ayon_context_parameter(
+                template_param_defs,
+                name="projectName",
+                default=instance.context.data["projectName"],
+                description="AYON project for this job",
+            )
+            template_param_names.add("projectName")
+            self.log.debug(
+                "adding project name: %s",
+                instance.context.data["projectName"]
+            )
+        if "userName" not in template_param_names:
+            self.add_ayon_context_parameter(
+                template_param_defs,
+                name="userName",
+                default=instance.context.data["user"],
+                description="AYON user name for this job",
+            )
+            template_param_names.add("userName")
+            self.log.debug(
+                "adding user name: %s",
+                instance.context.data["user"]
+            )
+        if "hostName" not in template_param_names:
+            self.add_ayon_context_parameter(
+                template_param_defs,
+                name="hostName",
+                default=instance.context.data["hostName"],
+                description="AYON host name for this job",
+            )
+            template_param_names.add("hostName")
+            self.log.debug(
+                "adding host name: %s",
+                instance.context.data["hostName"]
+            )
+        if "sourceFile" not in template_param_names:
+            self.add_ayon_context_parameter(
+                template_param_defs,
+                name="sourceFile",
+                default=instance.context.data.get("currentFile", ""),
+                description="Source file path from the host for this job",
+            )
+            template_param_names.add("sourceFile")
+            self.log.debug(
+                "adding source file: %s",
+                instance.context.data.get("currentFile", "")
+            )
+        if "productBaseType" not in template_param_names:
+            self.add_ayon_context_parameter(
+                template_param_defs,
+                name="productBaseType",
+                default=instance.data.get("productBaseType", ""),
+                description="Product base type for this job",
+            )
+            template_param_names.add("productBaseType")
+            self.log.debug(
+                "adding product base type: %s",
+                instance.data.get("productBaseType", "")
+            )
+        if "OutputFilePath" not in template_param_names:
+            self.add_ayon_context_parameter(
+                template_param_defs,
+                name="OutputFilePath",
+                default=instance.data.get("stagingDir", ""),
+                description="AYON output path for this job",
+            )
+            template_param_names.add("OutputFilePath")
+            self.log.debug(
+                "adding output path: %s",
+                instance.data.get("stagingDir", "")
+            )
 
         instance_attrs = instance.data.get("creator_attributes", {})
         self._apply_instance_attrs(
@@ -103,7 +235,9 @@ class CollectDeadlineCloudJobData(
             input_directories=set(settings.input_directories),
             output_directories=set(settings.output_directories),
         )
-        asset_refs_dict = get_asset_references_for_submission(asset_references)
+        asset_refs_dict = submitter_bg.get_asset_references_for_submission(
+            asset_references
+        )
 
         instance.data["deadline_cloud_job_data"] = {
             "job_template": job_template,
@@ -123,20 +257,24 @@ class CollectDeadlineCloudJobData(
 
     @staticmethod
     def _build_job_template(
-        settings: RenderSubmitterUISettings,
+        settings: Any,  # noqa: ANN401
         instance: pyblish.api.Instance,
     ) -> dict[str, Any]:
         """Build and return the job template, ensuring it has a name.
 
         Args:
-            settings: Render submitter UI settings.
+            settings: Render submitter settings.
             instance: Pyblish instance (used to derive a fallback job name).
 
         Returns:
             Job template dict.
 
         """
-        job_template = get_job_template_for_submission(settings)
+        submitter_bg = get_submitter_bridge(
+            host_name=get_current_host_name(),
+            instance=instance,
+        )
+        job_template = submitter_bg.get_job_template_for_submission(settings)
         if not job_template.get("name"):
             src_file: str = instance.context.data.get("currentFile", "")
             basename = os.path.basename(src_file) if src_file else ""
@@ -244,7 +382,7 @@ class CollectDeadlineCloudJobData(
 
     def _build_submitter_settings(
         self,
-        settings: RenderSubmitterUISettings,
+        settings: Any,  # noqa: ANN401
         dc_settings: dict[str, Any],
         queue_parameters: list[dict[str, Any]],
     ) -> dict[str, Any]:
@@ -253,7 +391,7 @@ class CollectDeadlineCloudJobData(
         AYON project/studio settings can override farm_id and queue_id.
 
         Args:
-            settings: Render submitter UI settings.
+            settings: Render submitter settings.
             dc_settings: Deadline Cloud AYON settings dict.
             queue_parameters: Queue parameters retrieved from Deadline Cloud.
 
@@ -278,10 +416,23 @@ class CollectDeadlineCloudJobData(
                 queue_id_override)
             queue_id = queue_id_override
 
+        if isinstance(settings, HoudiniSetting):
+            render_settings = {
+                field.name: getattr(settings, field.name)
+                for field in dataclasses.fields(settings)
+                if field.name != "rop_node"
+            }
+            if settings.rop_node is not None:
+                render_settings["rop_node"] = settings.rop_node.path()
+            else:
+                render_settings["rop_node"] = None
+        else:
+            render_settings = dataclasses.asdict(settings)
+
         return {
             "profile_name": profile_name,
             "default_farm_id": farm_id,
             "queue_id": queue_id,
             "queue_parameters": queue_parameters,
-            "render_settings": dataclasses.asdict(settings),
+            "render_settings": render_settings,
         }
