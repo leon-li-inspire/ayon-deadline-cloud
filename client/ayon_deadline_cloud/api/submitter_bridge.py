@@ -58,7 +58,7 @@ def get_submitter_bridge(
         )
 
     if host_name == "houdini":
-        import hou  # type: ignore  # noqa: PGH003
+        import hou
         from deadline_cloud_for_houdini.submitter import (
             get_asset_references_for_submission,
             get_job_template_for_submission,
@@ -82,6 +82,24 @@ def get_submitter_bridge(
         }
         return SubmitterBridge(
             submitter_settings=settings,
+            get_job_template_for_submission=get_job_template_for_submission,
+            get_parameter_values_for_submission=get_parameter_values_for_submission,
+            get_queue_parameters=get_queue_parameters,
+            get_asset_references_for_submission=get_asset_references_for_submission,
+        )
+
+    if host_name == "nuke":
+        from deadline.nuke_submitter.data_classes import (
+            SubmitterUISettings,
+        )
+        from deadline.nuke_submitter.deadline_submitter_for_nuke import (
+            get_asset_references_for_submission,
+            get_job_template_for_submission,
+            get_parameter_values_for_submission,
+            get_queue_parameters,
+        )
+        return SubmitterBridge(
+            submitter_settings=SubmitterUISettings(),
             get_job_template_for_submission=get_job_template_for_submission,
             get_parameter_values_for_submission=get_parameter_values_for_submission,
             get_queue_parameters=get_queue_parameters,

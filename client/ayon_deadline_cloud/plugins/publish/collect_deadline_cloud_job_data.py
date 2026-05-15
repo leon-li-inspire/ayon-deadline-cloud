@@ -35,7 +35,7 @@ class CollectDeadlineCloudJobData(
     # this could be used in the future for other hosts, but
     # we would have to move any calls with deadline.maya_submitter
     # to library.
-    hosts: ClassVar[list[str]] = ["maya", "houdini"]
+    hosts: ClassVar[list[str]] = ["maya", "houdini", "nuke"]
     log: Logger
 
     @staticmethod
