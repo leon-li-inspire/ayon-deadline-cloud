@@ -1,6 +1,7 @@
 """Create Deadline Cloud Job."""
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any, Type
 
 from ayon_core.lib import (
@@ -10,6 +11,7 @@ from ayon_core.lib import (
     TextDef,
 )
 from ayon_maya.api import plugin
+from deadline.maya_submitter.scene import Scene
 from maya import cmds
 
 if TYPE_CHECKING:
@@ -49,6 +51,17 @@ class CreateDeadlineCloudJob(plugin.MayaCreator):
         instance_node = instance.get("instance_node")
         dummy_set = cmds.sets(name="empty_dummy_set", empty=True)
         cmds.sets([dummy_set], forceElement=instance_node)
+
+        # Ensure ProjectPath and OutputFilePath are set from AYON context
+        work_dir = self._get_ayon_work_dir()
+        if work_dir:
+            creator_attrs = instance.creator_attributes
+            if not creator_attrs.get("ProjectPath"):
+                creator_attrs["ProjectPath"] = Scene.project_path() or work_dir
+            if not creator_attrs.get("OutputFilePath"):
+                creator_attrs["OutputFilePath"] = (
+                    Scene.output_path() or work_dir)
+
         return instance
 
     def _load_job_data(self) -> list[Type[AbstractAttrDef]]:
@@ -71,6 +84,13 @@ class CreateDeadlineCloudJob(plugin.MayaCreator):
         )
 
         settings = RenderSubmitterUISettings()
+
+        # Populate project and output paths from scene settings
+        work_dir = self._get_ayon_work_dir()
+        if work_dir:
+            settings.project_path = Scene.project_path() or work_dir
+            settings.output_path = Scene.output_path() or work_dir
+
         queue_parameters: list[dict[str, Any]] = get_queue_parameters()
 
         # this would be 'job_bundle/template.yaml'
@@ -136,3 +156,18 @@ class CreateDeadlineCloudJob(plugin.MayaCreator):
 
         """
         return self._load_job_data()
+
+    @staticmethod
+    def _get_ayon_work_dir() -> str:
+        """Get the AYON work directory for the current context.
+
+        Returns:
+            The current work directory path, or empty string on failure.
+
+        """
+        work_dir = os.getenv("AYON_WORKDIR", "")
+        if work_dir:
+            return work_dir
+
+        # Fallback: use Maya workspace
+        return cmds.workspace(query=True, rootDirectory=True) or ""
