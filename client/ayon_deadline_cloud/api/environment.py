@@ -50,7 +50,7 @@ class HostCondaPackages:
             A list of conda packages for Blender
 
         """
-        from deadline.blender_submitter._version import (  # noqa: PLC2701
+        from deadline_cloud_blender_submitter._version import (  # noqa: PLC2701
             version_tuple as adaptor_version_tuple,
         )
 
