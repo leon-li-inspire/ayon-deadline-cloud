@@ -72,6 +72,8 @@ class HostCondaPackages:
         # the version constrain in that case.
         adaptor_version = ".".join(str(v) for v in adaptor_version_tuple[:2])
         adaptor_version = f"={adaptor_version}.*"
+        if adaptor_version_tuple[0] == 0 and adaptor_version_tuple[1] == 0:
+            adaptor_version = ""
         packages.extend(
             (
                 f"blender={blender_version}.*",
