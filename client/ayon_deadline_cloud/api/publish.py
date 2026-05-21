@@ -2,13 +2,23 @@
 from __future__ import annotations
 
 import contextlib
+import logging
+import os
+import sys
 from typing import Optional
 
 import ayon_api
 import pyblish.api
 import pyblish.util
+from ayon_core.addon import AddonsManager
 from ayon_core.pipeline import install_ayon_plugins
-from ayon_core.pipeline.publish import publish_plugins_discover
+from ayon_core.pipeline.publish import (
+    filter_crashed_publish_paths,
+    publish_plugins_discover,
+)
+from ayon_core.settings import get_project_settings
+
+log = logging.getLogger(__name__)
 
 
 def publish_content(  # noqa: PLR0913, PLR0917
@@ -19,7 +29,7 @@ def publish_content(  # noqa: PLR0913, PLR0917
         variant: str,
         product_base_type: str,
         task_name: Optional[str] = None,
-        host_name: Optional[str] = None,
+        host_name: Optional[str] = None,  # noqa: ARG001
         source_file: Optional[str] = None,
     ) -> None:
     """Publish content.
@@ -89,22 +99,49 @@ def publish_content(  # noqa: PLR0913, PLR0917
     if task_name:
         pyblish_context.data["task"] = task_name
 
-    if host_name:
-        pyblish_context.data["hostName"] = host_name
+    # if host_name:
+    #     pyblish_context.data["hostName"] = host_name
 
     if source_file:
         pyblish_context.data["sourceFile"] = source_file
 
     pyblish.api.register_host("shell")
+    pyblish.api.register_target("farm")
 
     install_ayon_plugins()
+    project_settings = get_project_settings(project_name)
+    addons_manager = AddonsManager(project_settings)
+
+    applications_addon = addons_manager.get_enabled_addon("applications")
+    if applications_addon is not None:
+        env = applications_addon.get_farm_publish_environment_variables(
+            project_name,
+            folder_path,
+            task_name,
+        )
+        os.environ.update(env)
+
     discover_result = publish_plugins_discover()
+
+    filtered_crashed_paths = filter_crashed_publish_paths(
+        project_name,
+        set(discover_result.crashed_file_paths),
+    )
+    if filtered_crashed_paths:
+        joined_paths = "\n".join(
+            [f"- {path}" for path in filtered_crashed_paths]
+        )
+        log.error(
+            "Plugin discovery strict mode is enabled. "
+            "Crashed plugin paths that prevent from publishing:"
+            "\n%s", joined_paths)
+        sys.exit(1)
+
     publish_plugins = discover_result.plugins
 
     for result in pyblish.util.publish_iter(
             context=pyblish_context,
             plugins=publish_plugins,
-            targets={"farm"},
     ):
         if result["error"]:
             raise RuntimeError(repr(result))
