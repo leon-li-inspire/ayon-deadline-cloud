@@ -6,7 +6,7 @@ import os
 from contextlib import suppress
 from dataclasses import asdict
 from pathlib import Path
-from typing import ClassVar, NamedTuple
+from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
 import ayon_api
 import clique
@@ -30,6 +30,9 @@ from ayon_deadline_cloud.api.datatypes import (
     InstanceData,
     StandardRepresentation,
 )
+
+if TYPE_CHECKING:
+    from logging import Logger
 
 
 class RepresentationTuple(NamedTuple):
@@ -74,9 +77,10 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
 
     label = "Create publishing instances from files"
     # must run as soon as possible
-    order = pyblish.api.CollectorOrder - 0.5
+    order = pyblish.api.CollectorOrder - 0.499
     hosts: ClassVar[list[str]] = ["shell"]
     targets: ClassVar[list[str]] = ["farm"]
+    log: Logger
 
     def __init__(self):
         """Constructor."""
@@ -94,6 +98,8 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
             KnownPublishError: When folder or task cannot be found in AYON.
 
         """
+        self._context: pyblish.api.Context = context
+        self.log.info("Processing %s", context.data.get("outputPath"))
         if not context.data.get("outputPath"):
             msg = "Unable to find output path in context."
             raise KnownPublishError(msg)
@@ -136,14 +142,17 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
                 )
                 raise KnownPublishError(msg)
 
-        self._context = context
-
         instances = self.get_instances(
             Path(context.data["outputPath"]))
+
+        if not instances:
+            self.log.warning("No instances detected.")
+            return
 
         for instance in instances:
             pyblish_instance = context.create_instance(
                 name=instance.name)
+            self.log.info("Creating instance %s", instance.name)
             pyblish_instance.data.update(asdict(instance))
             add_trait_representations(
                 pyblish_instance,
@@ -154,6 +163,13 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
             pyblish_instance.data["representations"] = (
                     pyblish_instance.data.pop("standard_representations")
             )
+
+            # handle cleanupFullPaths
+            context.data["cleanupFullPaths"] = []
+            context.data["cleanupEmptyDirs"] = []
+
+        from pprint import pformat
+        self.log.debug(pformat(context.data))
 
     @staticmethod
     def _make_trait_representation(
@@ -355,9 +371,9 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
                 project_name=self._context.data["projectName"],
                 folder_entity=self._folder_entity,
                 task_entity=self._task_entity,
-                product_base_type="render",
+                product_base_type=self._context.data["productBaseType"],
                 product_type="render",
-                host_name="deadline_cloud",
+                host_name=self._context.data["hostName"],
                 variant=variant,
             )
 
@@ -368,11 +384,11 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
                     label="",
                     name=variant,
                     family="render",
-                    families=["render"],
+                    families=["render", "review"],
                     folderPath=self._context.data["folderPath"],
                     task=self._context.data["task"],
                     variant=variant,
-                    productBaseType="render",
+                    productBaseType=self._context.data["productBaseType"],
                     productName=product_name,
                     trait_representations=[
                         r.trait for r in representations],
@@ -433,10 +449,10 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
                 project_name=self._context.data["projectName"],
                 folder_entity=self._folder_entity,
                 task_entity=self._task_entity,
-                product_base_type="render",
+                product_base_type=self._context.data["productBaseType"],
                 product_type="render",
-                host_name="deadline_cloud",
-                variant=common_prefix,
+                host_name=self._context.data["hostName"],
+                variant=self._context.data["productVariant"],
             )
 
             return [
@@ -449,8 +465,8 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
                     families=["render"],
                     folderPath=self._context.data["folderPath"],
                     task=self._context.data["task"],
-                    variant=common_prefix,
-                    productBaseType="render",
+                    variant=self._context.data["productVariant"],
+                    productBaseType=self._context.data["productBaseType"],
                     productName=product_name,
                     trait_representations=[
                         r.trait for r in representations],
@@ -471,24 +487,24 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
                 project_name=self._context.data["projectName"],
                 folder_entity=self._folder_entity,
                 task_entity=self._task_entity,
-                product_base_type="render",
+                product_base_type=self._context.data["productBaseType"],
                 product_type="render",
-                host_name="deadline_cloud",
-                variant=representations.trait.name,
+                host_name=self._context.data["hostName"],
+                variant=self._context.data["productVariant"],
             )
 
             instances.append(
                 InstanceData(
                     publish=True,
                     active=True,
-                    label="",
+                    label="Individual products",
                     name=representations.trait.name,
                     family="render",
-                    families=["render"],
+                    families=["render", "review"],
                     folderPath=self._context.data["folderPath"],
                     task=self._context.data["task"],
-                    variant=representations.trait.name,
-                    productBaseType="render",
+                    variant=self._context.data["productVariant"],
+                    productBaseType=self._context.data["productBaseType"],
                     productName=product_name,
                     trait_representations=[representations.trait],
                     standard_representations=[representations.standard],
