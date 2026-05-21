@@ -16,6 +16,8 @@ def publish_content(  # noqa: PLR0913, PLR0917
         project_name: str,
         folder_path: str,
         user_name: str,
+        variant: str,
+        product_base_type: str,
         task_name: Optional[str] = None,
         host_name: Optional[str] = None,
         source_file: Optional[str] = None,
@@ -30,6 +32,8 @@ def publish_content(  # noqa: PLR0913, PLR0917
         project_name: Name of the project.
         folder_path: Path to the folder where the content is to be published.
         user_name: Name of the user who submitted the job.
+        variant: Product variant.
+        product_base_type: Product base type - passed to individual products.
         task_name: Name of the task to be published.
         host_name: Name of the host to be published.
         source_file: Path to the source file.
@@ -74,13 +78,16 @@ def publish_content(  # noqa: PLR0913, PLR0917
             raise ValueError(msg)
 
     pyblish_context = pyblish.api.Context()
-    pyblish_context.data["hostName"] = "workflow"
+    pyblish_context.data["hostName"] = "shell"
     pyblish_context.data["projectName"] = project_name
     pyblish_context.data["folderPath"] = folder_path
     pyblish_context.data["outputPath"] = path
+    pyblish_context.data["taskEntity"] = task_entity
+    pyblish_context.data["productVariant"] = variant
+    pyblish_context.data["projectBaseType"] = product_base_type
 
     if task_name:
-        pyblish_context.data["taskName"] = task_name
+        pyblish_context.data["task"] = task_name
 
     if host_name:
         pyblish_context.data["hostName"] = host_name
@@ -97,6 +104,7 @@ def publish_content(  # noqa: PLR0913, PLR0917
     for result in pyblish.util.publish_iter(
             context=pyblish_context,
             plugins=publish_plugins,
+            targets={"farm"},
     ):
         if result["error"]:
             raise RuntimeError(repr(result))

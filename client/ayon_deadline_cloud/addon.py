@@ -1,7 +1,9 @@
 """Deadline Cloud Addon for AYON."""
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 import click
@@ -81,9 +83,11 @@ class DeadlineCloudAddon(AYONAddon, IPluginPaths):
             project_name: str,
             user_name: str,
             product_base_type: str,
+            variant: str,
             task_name: Optional[str],
             host_name: Optional[str],
             source_file: Optional[str],
+            path_mapping_file: Optional[str],
     ) -> None:
         """Publish the result of a Deadline Cloud processed job.
 
@@ -98,6 +102,7 @@ class DeadlineCloudAddon(AYONAddon, IPluginPaths):
                 with hardcoded `render` - in the future, product base type
                 should be passed correctly to support other publish
                 types.
+            variant: Product variant.
             task_name: Optional name of the task associated with
                 the job result.
             host_name: Optional name of the host application associated with
@@ -105,25 +110,57 @@ class DeadlineCloudAddon(AYONAddon, IPluginPaths):
             source_file: Optional path to a source file related to the job
                 result, which might be used for validation or as part of
                 the publishing process.
+            path_mapping_file: Optional path to a file containing path mapping
+                rules, which can be used to resolve file paths during
+                the publishing process.
 
         """
-        # TODO(antirotor): Implement this method to trigger publishing of the
-        # result of a Deadline Cloud processed job. This might involve
-        # collecting the output files from the job, validating them, and then
-        # moving them to their final destination or registering them in AYON.
         self.log.debug(
             "publish called with arguments: "
             "folder_path=%s, project_name=%s, "
             "user_name=%s, product_base_name=%s, task_name=%s, "
-            "host_name=%s, source_file=%s",
+            "host_name=%s, source_file=%s, variant=%s",
             folder_path, project_name, user_name,
-            product_base_type, task_name, host_name, source_file
+            product_base_type, task_name, host_name, source_file,
+            variant
         )
+
+        # This is simple remapping code to take the path specified in the job
+        # and remap it to current system. Deadline Cloud won't do it
+        # automatically, because the path isn't of PATH type (it can't be
+        # because of the restriction in OpenJD that paths must be relative
+        # to the job bundle. This remapping is very basic and is based on
+        # simple string replacement - we need to eventually replace it with
+        # something more robust, or force somehow Deadline Cloud to do it.
+
+        if path_mapping_file:
+            self.log.debug("Using path mapping file: %s", path_mapping_file)
+            with open(path_mapping_file, encoding="utf8") as f:
+                path_mapping = json.load(f)
+
+            for rules in path_mapping["path_mapping_rules"]:
+                if path.startswith(rules["source_path"]):
+                    path = path.replace(
+                        rules["source_path"],
+                        f'{rules["destination_path"]}{os.path.sep}',
+                        1
+                    )
+                    if os.path.sep == "/":
+                        path = path.replace("\\", "/")
+
+                    path = Path(path).resolve().as_posix()
+                    self.log.debug(
+                        "Mapped path to: %s using rules: %s",
+                        path, rules
+                    )
+                    break
 
         publish_content(
             path=path,
             project_name=project_name,
             folder_path=folder_path,
+            product_base_type=product_base_type,
+            variant=variant,
             user_name=user_name,
             task_name=task_name,
             host_name=host_name,
@@ -184,13 +221,15 @@ class DeadlineCloudAddon(AYONAddon, IPluginPaths):
         ).option(
             "-s",
             "--source-file",
+            type=click.Path(exists=False, file_okay=True, dir_okay=False),
+        ).option(
+            "--path-mapping-file",
             type=click.Path(exists=True, file_okay=True, dir_okay=False),
-        )
-
-        cli_main.argument(
+            required=False,
+        ).argument(
             "path",
             nargs=1,
-            type=click.Path(exists=True, file_okay=False, dir_okay=True),
+            type=click.Path(exists=False, file_okay=False, dir_okay=True),
         )
 
         addon_click_group.add_command(cli_main.to_click_obj())

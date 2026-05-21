@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
+import ayon_deadline_cloud.version
 import pyblish.api
 from deadline.client.api import create_job_from_job_bundle
 from deadline.client.job_bundle._yaml import (  # noqa: PLC2701
@@ -43,13 +45,14 @@ class SubmitToDeadlineCloud(pyblish.api.InstancePlugin):
         job_data = instance.data["deadline_cloud_job_data"]
 
         known_paths = self._collect_known_asset_paths(job_data)
+        # refs = AssetReferences.from_dict(job_data["assetReferences"])
 
         self.log.info(
             "Creating job bundle and submitting to AWS Deadline Cloud...")
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with (tempfile.TemporaryDirectory() as temp_dir):
             with open(f"{temp_dir}/template.yaml", "w", encoding="utf8") as f:
                 deadline_yaml_dump(
-                    job_data["job_template"],
+                    job_data["jobTemplate"],
                     f,
                     indent=1
                 )
@@ -58,7 +61,7 @@ class SubmitToDeadlineCloud(pyblish.api.InstancePlugin):
                     "w",
                     encoding="utf8") as f:
                 deadline_yaml_dump(
-                    {"parameterValues": job_data["parameter_values"]},
+                    {"parameterValues": job_data["parameterValues"]},
                     f,
                     indent=1
                 )
@@ -67,20 +70,26 @@ class SubmitToDeadlineCloud(pyblish.api.InstancePlugin):
                     "w",
                     encoding="utf8") as f:
                 deadline_yaml_dump(
-                    job_data["asset_references"],
+                    job_data["assetReferences"],
                     f,
                     indent=1
                 )
             self.log.info("Submitting job bundle to AWS Deadline Cloud...")
-            kwargs = {
+            kwargs: dict[str, Any] = {
                 "job_bundle_dir": temp_dir,
-                "print_function_callback": self.log.info,
+                "job_attachments_file_system": "COPIED",
+                "submitter_name": "AYON Deadline Cloud Addon",
+                "submitter_version": ayon_deadline_cloud.version.__version__,
+                "print_function_callback": self.log.debug,
+                # to take the snapshot without submitting:
+                # "debug_snapshot_dir": "C:\\debug\\AWS_DC_snapshots"
             }
             if instance.context.data["hostName"] != "houdini":
                 kwargs["known_asset_paths"] = known_paths
                 kwargs["interactive_confirmation_callback"] = (
                     lambda _msg, _default: True
                 )
+
             job_id = create_job_from_job_bundle(**kwargs)
             self.log.info(
                 "Job submitted to AWS Deadline Cloud with ID: %s",
@@ -95,7 +104,7 @@ class SubmitToDeadlineCloud(pyblish.api.InstancePlugin):
         Returns:
             list[str]: Deduplicated, normalized paths treated as known assets.
         """
-        template = job_data.get("job_template", {})
+        template = job_data.get("jobTemplate", {})
         path_param_names = SubmitToDeadlineCloud._collect_path_parameter_names(
             template
         )
@@ -103,7 +112,7 @@ class SubmitToDeadlineCloud(pyblish.api.InstancePlugin):
         paths = SubmitToDeadlineCloud._collect_asset_reference_paths(job_data)
         paths.update(
             SubmitToDeadlineCloud._collect_parameter_value_paths(
-                job_data.get("parameter_values", []),
+                job_data.get("parameterValues", []),
                 path_param_names,
             )
         )
@@ -121,7 +130,9 @@ class SubmitToDeadlineCloud(pyblish.api.InstancePlugin):
 
         """
         paths: set[str] = set()
-        refs = AssetReferences.from_dict(job_data.get("asset_references"))
+
+        refs = AssetReferences.from_dict(
+            job_data["assetReferences"])
 
         for filename in refs.input_filenames:
             parent = os.path.dirname(os.path.abspath(filename))

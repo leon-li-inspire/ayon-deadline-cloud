@@ -88,7 +88,7 @@ class CreateDeadlineCloudJob(NukeCreator):
                             key=param_def["name"],
                             items=param_def["allowedValues"],
                             default=value,
-                            multiselection=True,
+                            multiselection=False,
                         )
                     )
                 else:
