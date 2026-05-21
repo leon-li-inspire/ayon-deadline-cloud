@@ -219,6 +219,10 @@ class DeadlineCloudAddon(AYONAddon, IPluginPaths):
             type=click.STRING,
             required=True
         ).option(
+            "--variant",
+            type=click.STRING,
+            required=True
+        ).option(
             "-s",
             "--source-file",
             type=click.Path(exists=False, file_okay=True, dir_okay=False),
