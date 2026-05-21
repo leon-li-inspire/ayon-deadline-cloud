@@ -82,9 +82,9 @@ def publish_content(  # noqa: PLR0913, PLR0917
     pyblish_context.data["projectName"] = project_name
     pyblish_context.data["folderPath"] = folder_path
     pyblish_context.data["outputPath"] = path
-    pyblish_context.data["taskEntity"] = task_entity
+    # pyblish_context.data["taskEntity"] = task_entity
     pyblish_context.data["productVariant"] = variant
-    pyblish_context.data["projectBaseType"] = product_base_type
+    pyblish_context.data["productBaseType"] = product_base_type
 
     if task_name:
         pyblish_context.data["task"] = task_name
