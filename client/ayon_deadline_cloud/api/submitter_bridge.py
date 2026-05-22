@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from deadline.maya_submitter.data_classes import RenderSubmitterUISettings
     from deadline.nuke_submitter.data_classes import SubmitterUISettings
     from deadline_cloud_blender_submitter.template_filling import (
-        BlenderSubmitterUISettings
+        BlenderSubmitterUISettings,
     )
 
 
@@ -480,7 +480,7 @@ class BlenderSubmitterBridge(SubmitterBridge["BlenderSubmitterUISettings"]):
     def __init__(self) -> None:
         """Initialize."""
         from deadline_cloud_blender_submitter.template_filling import (
-            BlenderSubmitterUISettings
+            BlenderSubmitterUISettings,
         )
         self._settings = BlenderSubmitterUISettings()
 
