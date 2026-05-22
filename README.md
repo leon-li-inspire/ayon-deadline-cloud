@@ -1,6 +1,10 @@
 # AYON Addon for AWS Deadline Cloud Integration
 This repository contains an [AYON](https://ynput.io/ayon/) addon for integration with [AWS Deadline Cloud](https://aws.amazon.com/deadline-cloud/).
 
+It supports following features:
+* Submitting render jobs from Maya, Nuke, Houdini and Blender
+* Publishing renders to AYON
+
 ## Requirements
 - Deadline Cloud submitters must be available in target DCCs (AYON Tools environments can be used to set them).
 - Deadline Cloud credentials must be configured on every machine used for submission.
@@ -29,6 +33,13 @@ In AYON, open the AWS Deadline Cloud settings. You can keep default values, but 
 
 ### Install Deadline Cloud submitters
 For submitter installation, refer to [the official documentation](https://docs.aws.amazon.com/deadline-cloud/latest/userguide/submitter.html).
+
+> [!NOTE]
+> For now, you need to use AYON specific forks until the code is merged upstream.
+> - Maya: https://github.com/ynput/deadline-cloud-for-maya
+> - Houdini: https://github.com/ynput/deadline-cloud-for-houdini
+> - Nuke: https://github.com/ynput/deadline-cloud-for-nuke
+> - Blender: https://github.com/ynput/deadline-cloud-for-blender
 
 You can use AYON tools to configure submitters for AYON-managed applications. In the AYON Applications addon, create a new definition at `ayon+settings://applications/tool_groups` per host with environments like this (example for Nuke):
 
@@ -60,21 +71,49 @@ For rendering, [SMF](#terminology) is sufficient. For publishing, create a [CMF]
 ### Queue and environment
 If you use the same queue for rendering and publishing, disable Conda environment creation on the CMF publishing machine by modifying [this environment](https://github.com/aws-deadline/deadline-cloud-samples/blob/mainline/queue_environments/conda_queue_env_inline.yaml).
 
-For example, set an environment variable on the publishing machine to exit early from Conda setup in that step (see [Setup](#setup)).
+In AWS Console go to Deadline Cloud Dashboard, click on the farm, select your Queue and then go to *Queue environments* tab. There, you can edit the environment file directly in the browser.
 
+The goal is to not run `conda create --yes --quiet ...` on publish workers.
+
+For example, set an environment variable `DISABLE_CONDA_ENV` on the publishing machine to exit early from Conda setup with something like:
+```sh
+if [ -v DISABLE_CONDA_ENV ]; then
+    echo "Disabling Conda."
+    exit 0
+fi
+```
+Or you can do something more sophisticated, based on your setup and needs.
+
+### Host Requirements
 To prevent publishing on SMF render machines (where AYON is not available) and rendering on CMF publishing machines, configure Host Requirements using the roles from [Configure the addon](#configure-the-addon).
 
-Set the `attr.role` attribute to `render` or `publish` (or your custom role names) either:
-- On the whole CMF fleet (AWS Console), or
-- On a specific machine in Deadline Cloud worker agent configuration (usually `/etc/amazon/deadline/worker`).
+You can do it per Fleet on Deadline Cloud Dashboard in AWS Console - Select your farm, go to the Fleet tab, select your CMF fleet and
+go to the *Worker capabilities* tab. You can add `attr.role` with the value defined in addon settings in the *Custom worker capabilities* section there.
+
+Set the `attr.role` attribute to `render` or `publish` (or your custom role names):
+- On the whole SMF fleet (AWS Console) set `render`
+- On a specific machine in Deadline Cloud worker agent configuration This can be done on the specific machine by editing the configuration file. This file can be found usually on `/etc/amazon/deadline/worker.toml` - [more information about Deadline Cloud worker agent configuration](https://github.com/aws-deadline/deadline-cloud-worker-agent/blob/release/docs/configuration.md)
 
 ### Storage profiles
-Configure storage profiles to match the path roots defined by your project/studio Anatomy.
+Configure storage profiles to match the path roots defined by your project/studio Anatomy. So if your roots look like this:
+```json
+{
+    "windows": "P:\\projects",
+    "linux": "/mnt/share/projects",
+    "darwin": "/Volumes/projects"
+}
+```
+You need to create platform specific profiles, something like:
+
+| Platform | Path Name | Type | Location Path |
+| --- | --- | --- | --- |
+| Linux | projectsDrive | SHARED | /mnt/projects |
+| Windows | projectsDrive | SHARED | P:\\projects |
 
 ### Publishing worker machine
 To set up the worker machine, [follow this guide](https://docs.aws.amazon.com/deadline-cloud/latest/developerguide/worker-host.html).
 
-For publishing, install AYON Launcher and make it available in `PATH` for the user running the jobs. Use `AYON_SERVER_URL` and `AYON_API_KEY` environment variables to configure access to the AYON server instance. Ensure the machine can access all project Anatomy roots.
+For publishing, install AYON Launcher and make it available in `PATH` for the user running the jobs. Use `AYON_SERVER_URL` and `AYON_API_KEY` environment variables to configure access to the AYON server instance. Ensure the machine can access all project Anatomy roots. [Setup](#host-requirements) the host requirements on that machine if needed.
 
 ## Design
 
@@ -201,11 +240,12 @@ When publishing starts, AYON runs a collector plugin that scans files in the spe
 - Nuke: multiple write nodes are not supported (all or one).
 
 ### Publishing step
-- Runs only on preconfigured CMF machines with AYON server access and studio filesystem access.
-- Uses preconfigured user credentials.
-- Cannot handle single-frame sequences.
-- Missing additional publishing metadata (for example color management data, review tags).
+- Runs only on preconfigured CMF machines with AYON server access and studio filesystem access:
+     - AYON Launcher as a Conda/Rez/Python [ynput/ayon-deadline-cloud#7]
+     - Sync published results from S3 bucket to studio [ynput/ayon-deadline-cloud#20]
+- Uses preconfigured user credentials. [ynput/ayon-deadline-cloud#21]
+- Cannot handle single-frame sequences. [ynput/ayon-deadline-cloud#22]
+- Missing additional publishing metadata (for example color management data, review tags). [ynput/ayon-deadline-cloud#22]
 - No simple failure feedback path (other than inspecting logs in Deadline Monitor).
-- Path remapping should ideally be handled entirely by Deadline Cloud.
-- Frame-range resolution is derived from parent entity or representation length, and cannot handle multiple representations with different lengths.
-
+- Path remapping should ideally be handled entirely by Deadline Cloud. [ynput/ayon-deadline-cloud#23]
+- Frame-range resolution is derived from parent entity or representation length, and cannot handle multiple representations with different lengths. [ynput/ayon-deadline-cloud#22]
