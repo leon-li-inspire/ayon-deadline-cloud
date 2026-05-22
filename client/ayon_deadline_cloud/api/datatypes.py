@@ -15,6 +15,7 @@ class StandardRepresentation:
     ext: str
     files: Union[str, list[str]]
     stagingDir: str
+    tags: list[str]
 
 
 @dataclass
@@ -26,6 +27,7 @@ class InstanceData:
     name: str
     productName: str
     productBaseType: str
+    productType: str
     family: str
     families: list[str]
     folderPath: str

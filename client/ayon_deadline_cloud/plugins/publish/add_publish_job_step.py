@@ -58,7 +58,7 @@ class AddPublishingStep(pyblish.api.InstancePlugin):
             publish_roles,
         )
 
-        job_template = instance.data["deadline_cloud_job_data"]["job_template"]
+        job_template = instance.data["deadline_cloud_job_data"]["jobTemplate"]
         try:
             steps: list[dict] = job_template["steps"]
         except KeyError as e:
@@ -156,15 +156,22 @@ class AddPublishingStep(pyblish.api.InstancePlugin):
 #!/bin/bash
 set -xeuo pipefail
 
+pwd
+
+echo "File path mapping:"
+cat "{{Session.PathMappingRulesFile}}"
+
 echo "Running publish step for AYON Deadline Cloud addon..."
-ayon addon deadline_cloud publish \
- --folder "{{Param.folderPath}}" \
+ayon --debug addon deadline_cloud publish \
+ --folder-path "{{Param.folderPath}}" \
  --task-name "{{Param.taskName}}" \
  --project-name "{{Param.projectName}}" \
  --user-name "{{Param.userName}}" \
  --host-name "{{Param.hostName}}" \
  --product-base-type "{{Param.productBaseType}}" \
+ --variant "{{Param.variant}}" \
  --source-file "{{Param.sourceFile}}" \
+ --path-mapping-file "{{Session.PathMappingRulesFile}}" \
  "{{Param.OutputFilePath}}"
                         """,
                     }
