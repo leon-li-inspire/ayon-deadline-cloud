@@ -13,7 +13,7 @@ from ayon_core.lib import (
 )
 
 
-class CreateBlendScene(plugin.BlenderCreator):
+class CreateDeadlineCloudJob(plugin.BlenderCreator):
     """Creator plugin for AWS Deadline Cloud Render Job."""
     identifier = "io.ayon.create.deadline_cloud_job"
     label = "Deadline Cloud Render Job"
@@ -85,7 +85,7 @@ class CreateBlendScene(plugin.BlenderCreator):
                             key=param_def["name"],
                             items=param_def["allowedValues"],
                             default=value,
-                            multiselection=True,
+                            multiselection=False,
                         )
                     )
                 elif param_def["name"] == "OutputDir":

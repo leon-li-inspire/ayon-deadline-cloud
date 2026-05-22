@@ -11,6 +11,10 @@ if TYPE_CHECKING:
     import pyblish.api
     from deadline.maya_submitter.data_classes import RenderSubmitterUISettings
     from deadline.nuke_submitter.data_classes import SubmitterUISettings
+    from deadline_cloud_blender_submitter.template_filling import (
+        BlenderSubmitterUISettings
+    )
+
 
 TSettings = TypeVar("TSettings")
 
@@ -470,6 +474,114 @@ class HoudiniSubmitterBridge(SubmitterBridge["HoudiniSetting"]):
         )
 
 
+class BlenderSubmitterBridge(SubmitterBridge["BlenderSubmitterUISettings"]):
+    """SubmitterBridge for Blender render submissions."""
+
+    def __init__(self) -> None:
+        """Initialize."""
+        from deadline_cloud_blender_submitter.template_filling import (
+            BlenderSubmitterUISettings
+        )
+        self._settings = BlenderSubmitterUISettings()
+
+    @property
+    def submitter_settings(self) -> BlenderSubmitterUISettings:
+        """Get the submitter UI settings."""
+        return self._settings
+
+    def get_job_template_for_submission(  # noqa: PLR6301
+            self,
+            settings: BlenderSubmitterUISettings,
+            host_requirements: Optional[dict[str, Any]] = None
+    ) -> dict[str, Any]:
+        """Get the job template for Blender render submissions.
+
+        Args:
+            settings: The Blender submitter UI settings.
+            host_requirements: Optional host requirements to inject into
+                each job step.
+
+        Returns:
+            The job template dictionary ready for serialization.
+        """
+        from deadline_cloud_blender_submitter.template_filling import (
+            get_job_template_for_submission,
+        )
+        return get_job_template_for_submission(
+            settings=settings,
+            host_requirements=host_requirements,
+        )
+
+    def get_parameter_values_for_submission(  # noqa: PLR6301
+            self,
+            settings: BlenderSubmitterUISettings,
+            queue_parameters: Optional[list[dict[str, Any]]] = None,
+    ) -> list[dict[str, Any]]:
+        """Get the parameter values for Blender render submissions.
+
+        Args:
+            settings: The Blender submitter UI settings.
+            queue_parameters: Optional queue parameters to include.
+
+        Returns:
+            The parameter values list ready for serialization.
+        """
+        from deadline_cloud_blender_submitter.template_filling import (
+            get_parameter_values_for_submission,
+        )
+        return get_parameter_values_for_submission(
+            settings=settings,
+            queue_parameters=queue_parameters,
+        )
+
+    def get_queue_parameters(  # noqa: PLR6301
+            self,
+            farm_id: Optional[str] = None,
+            queue_id: Optional[str] = None,
+            initial_values: Optional[dict[str, Any]] = None,
+    ) -> list[dict[str, Any]]:
+        """Get queue parameters from Deadline Cloud for Blender.
+
+        Args:
+            farm_id: Farm ID override; uses configured default if omitted.
+            queue_id: Queue ID override; uses configured default if omitted.
+            initial_values: Optional ``{name: value}`` overrides.
+
+        Returns:
+            Parameter definition dicts with ``name`` and ``value`` keys.
+        """
+        from deadline_cloud_blender_submitter.template_filling import (
+            get_queue_parameters,
+        )
+        return get_queue_parameters(
+            farm_id=farm_id,
+            queue_id=queue_id,
+            initial_values=initial_values,
+        )
+
+    def get_asset_references_for_submission(  # noqa: PLR6301
+        self,
+        asset_references: Optional[AssetReferences] = None,
+    ) -> dict[str, Any]:
+        """Get the asset references for Blender render submissions.
+
+        Args:
+            asset_references: Optional AssetReferences object. If not
+                provided, it is collected from the current Blender scene.
+
+        Returns:
+            The asset references dictionary ready for serialization.
+        """
+        from deadline_cloud_blender_submitter.template_filling import (
+            get_asset_references_for_submission,
+        )
+        if asset_references is None:
+            asset_references = AssetReferences()
+        return get_asset_references_for_submission(
+            asset_references=asset_references,
+        )
+
+
 def get_submitter_bridge(
         host_name: str, instance: pyblish.api.Instance
     ) -> SubmitterBridge:
@@ -495,20 +607,7 @@ def get_submitter_bridge(
         return NukeSubmitterBridge()
 
     if host_name == "blender":
-        from deadline_cloud_blender_submitter.template_filling import (
-            BlenderSubmitterUISettings,
-            get_asset_references_for_submission,
-            get_job_template_for_submission,
-            get_parameter_values_for_submission,
-            get_queue_parameters,
-        )
-        return SubmitterBridge(
-            submitter_settings=BlenderSubmitterUISettings(),
-            get_job_template_for_submission=get_job_template_for_submission,
-            get_parameter_values_for_submission=get_parameter_values_for_submission,
-            get_queue_parameters=get_queue_parameters,
-            get_asset_references_for_submission=get_asset_references_for_submission,
-        )
+        return BlenderSubmitterBridge()
 
     msg = f"Unsupported host: {host_name}"
     raise NotImplementedError(msg)
