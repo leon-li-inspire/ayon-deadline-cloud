@@ -3,6 +3,16 @@
 > Working notes — exploring distribution paths for AYON Launcher on Deadline Cloud workers.
 > Context: discussion in [wg-deadline-cloud thread](https://discord.com/channels/517362899170230292/1496527767217377430) and [ayon-launcher PR #303](https://github.com/ynput/ayon-launcher/pull/303).
 
+## TL;DR
+
+After thinking through it and seeing two parallel pieces of work converge:
+
+- **Don't ship the full cx_Freeze'd AYON Launcher to SMF workers.** It's the wrong primitive — too big, fights conda's immutability, conflicts with self-update.
+- **Ship a headless publish package instead.** A small, conda-installable Python package with just the code paths a worker needs (`ayon-core` headless, `ayon-python-api`, `pyblish-base`, the `ayon-deadline-cloud` addon). Pin its version at submission time.
+- **Keep the full launcher (PR #303 conda/rez output) for CMF and on-prem.** That's where the GUI, shim, and self-update belong.
+
+This is the shape Ondřej proposed and Leon independently prototyped. The rest of this doc is the reasoning that gets there.
+
 ## Two assumptions worth questioning
 
 Before picking a packaging format, two assumptions baked into AYON Launcher's design need a second look in the render farm context:
@@ -177,3 +187,53 @@ sequenceDiagram
 3. Which SMF path is the right MVP target, and which is the long-term answer?
 4. How does this interact with the existing render → publish split (SMF → CMF) agreed on for MVP?
 5. Does AYON Launcher already have a "pinned mode" flag, or does that need to be added?
+
+---
+
+## Update — convergence on a headless publish package
+
+After this doc went out, two things happened in close sequence in the wg-deadline-cloud thread:
+
+**Ondřej's reframe:** *"Maybe we don't really need the whole launcher. Maybe we could simply extract part of it as standalone pip installable thing that will bootstrap AYON and its own version can be independent of both launcher and addons."*
+
+**Leon's working prototype:** he had built a custom conda recipe (`ayon-publish` v1.9.5, noarch:python) that bundles `ayon-core` (headless), `ayon-python-api`, `pyblish-base`, `clique`, the `ayon_deadline_cloud` addon, and the dependencies needed to run `ayon addon deadline_cloud publish` on an SMF worker. He confirmed it works in the publish step.
+
+These are the same idea from two angles. Ondřej is asking *"what's the right factoring of AYON for headless workers?"* Leon answered with a recipe.
+
+### Why this collapses most of the SMF discussion above
+
+| Concern raised earlier | How a headless publish package handles it |
+|---|---|
+| Conda immutability | Package never mutates itself — no self-update on workers |
+| Auto-update determinism | Package version is the pin; bundle name + package version pin the publish-side code |
+| SMF privilege model | Job-user only reads from `$CONDA_PREFIX`, writes go to session dir |
+| cx_Freeze bundle size | Pure Python, tens of MB instead of hundreds |
+| Shim and GUI complications | Not shipped to workers at all |
+
+The four SMF paths (A/B/C/D) above were assuming we ship the full launcher to workers. Once we accept that workers only need the headless code paths, **Path A (stable conda + addon overlay)** is essentially what Leon built — just sliced finer than the full launcher.
+
+### Refined picture
+
+```mermaid
+flowchart LR
+    Build[ayon-launcher PR 303<br/>hatch build pipeline] --> CondaFull[Full launcher<br/>conda / rez package<br/>cx_Freeze + GUI + shim]
+    Build --> RezFull[Full launcher<br/>rez package]
+
+    Headless[ayon-publish recipe<br/>ayon-core headless<br/>+ python-api + pyblish<br/>+ ayon-deadline-cloud] --> CondaHeadless[Headless conda package<br/>noarch python]
+
+    CondaFull --> CMFInstall[CMF / on-prem<br/>workstation install]
+    RezFull --> CMFInstall
+
+    CondaHeadless --> SMFChannel[S3-backed conda channel<br/>queue env installs at session start]
+    SMFChannel --> SMFWorker[SMF worker<br/>publish step only]
+
+    CondaFull -. not appropriate .-> SMFNote[SMF — too heavy, fights<br/>immutability + self-update]
+```
+
+### Open items now narrower
+
+1. Agree explicitly that the SMF target is a headless conda package, separate artifact from PR #303's full launcher package.
+2. Decide ownership of the headless package recipe — does it live in `ynput/ayon-core`, `ynput/ayon-deadline-cloud`, or its own repo? Leon's prototype currently has hardcoded local paths and pins ayon-core 1.9.5 + addon by file copy.
+3. Settle on dependency pinning strategy: pip-install with explicit versions (Leon's approach, defensible for a self-contained package) vs sourcing each component as a separate `source:` entry.
+4. Cross-platform: Leon's wrapper is Linux-shaped. Windows fleets need a `bin\ayon.bat` equivalent.
+5. How addons get pinned alongside the headless code — bake into the package (rebuild per addon update) vs pass via job parameters and stage from the AYON server.
