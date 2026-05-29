@@ -6,7 +6,8 @@ import os
 from contextlib import suppress
 from dataclasses import asdict
 from pathlib import Path
-from typing import ClassVar, NamedTuple
+from pprint import pformat
+from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
 import ayon_api
 import clique
@@ -15,6 +16,7 @@ from ayon_core.pipeline import KnownPublishError
 from ayon_core.pipeline.create import get_product_name
 from ayon_core.pipeline.publish import (
     add_trait_representations,
+    get_trait_representations,
 )
 from ayon_core.pipeline.traits import (
     FileLocation,
@@ -22,6 +24,7 @@ from ayon_core.pipeline.traits import (
     FrameRanged,
     Image,
     MimeType,
+    MissingTraitError,
 )
 from ayon_core.pipeline.traits import (
     Representation as TraitRepresentation,
@@ -30,6 +33,9 @@ from ayon_deadline_cloud.api.datatypes import (
     InstanceData,
     StandardRepresentation,
 )
+
+if TYPE_CHECKING:
+    from logging import Logger
 
 
 class RepresentationTuple(NamedTuple):
@@ -74,9 +80,10 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
 
     label = "Create publishing instances from files"
     # must run as soon as possible
-    order = pyblish.api.CollectorOrder - 0.5
+    order = pyblish.api.CollectorOrder - 0.2
     hosts: ClassVar[list[str]] = ["shell"]
     targets: ClassVar[list[str]] = ["farm"]
+    log: Logger
 
     def __init__(self):
         """Constructor."""
@@ -94,12 +101,15 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
             KnownPublishError: When folder or task cannot be found in AYON.
 
         """
-        if not context.data.get("outputPath"):
-            msg = "Unable to find output path in context."
-            raise KnownPublishError(msg)
+        self._context: pyblish.api.Context = context
+        self.log.info("Processing %s", self._context.data.get("outputPath"))
+        if not self._context.data.get("outputPath"):
+            self.log.warning("No output path provided. Skipping.")
+            return
 
         username = (
-                context.data.get("user") or os.environ.get("AYON_USERNAME")
+                self._context.data.get("user")
+                or os.environ.get("AYON_USERNAME")
         )
         if username:
             # ayon-python-api does not have public api function to find
@@ -108,8 +118,8 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
             with suppress(ValueError):
                 con.set_default_service_username(username)
 
-        folder_path: str = context.data["folderPath"]
-        project_name: str = context.data["projectName"]
+        folder_path: str = self._context.data["folderPath"]
+        project_name: str = self._context.data["projectName"]
         self._folder_entity = ayon_api.get_folder_by_path(
             project_name=project_name,
             folder_path=folder_path,
@@ -122,28 +132,31 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
             raise KnownPublishError(msg)
 
         self._task_entity = None
-        if context.data.get("task"):
+        if self._context.data.get("task"):
             self._task_entity = ayon_api.get_task_by_name(
                 project_name=project_name,
                 folder_id=self._folder_entity["id"],
-                task_name=context.data["task"],
+                task_name=self._context.data["task"],
             )
             if not self._task_entity:
                 msg = (
-                    f"Unable to find task '{context.data['ask']}' "
+                    f"Unable to find task '{self._context.data['ask']}' "
                     f"in folder '{folder_path}' "
                     f"in project '{project_name}'."
                 )
                 raise KnownPublishError(msg)
 
-        self._context = context
-
         instances = self.get_instances(
-            Path(context.data["outputPath"]))
+            Path(self._context.data["outputPath"]))
+
+        if not instances:
+            self.log.warning("No instances detected.")
+            return
 
         for instance in instances:
-            pyblish_instance = context.create_instance(
+            pyblish_instance = self._context.create_instance(
                 name=instance.name)
+            self.log.info("Creating instance %s", instance.name)
             pyblish_instance.data.update(asdict(instance))
             add_trait_representations(
                 pyblish_instance,
@@ -154,6 +167,13 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
             pyblish_instance.data["representations"] = (
                     pyblish_instance.data.pop("standard_representations")
             )
+            self._add_time_info(pyblish_instance)
+
+            self.log.debug(pformat(pyblish_instance.data))
+
+        # handle cleanupFullPaths
+        self._context.data["cleanupFullPaths"] = []
+        self._context.data["cleanupEmptyDirs"] = []
 
     @staticmethod
     def _make_trait_representation(
@@ -195,6 +215,7 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
             ext=reminder_path.suffix,
             files=reminder_path.name,
             stagingDir=reminder_path.parent.as_posix(),
+            tags=["review"]
         )
 
     def _make_representations(
@@ -280,6 +301,7 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
             ext=col.tail.lstrip("."),
             files=files,
             stagingDir=staging_dir.as_posix(),
+            tags=["review"]
         )
 
     def _make_collection_representations(
@@ -355,9 +377,9 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
                 project_name=self._context.data["projectName"],
                 folder_entity=self._folder_entity,
                 task_entity=self._task_entity,
-                product_base_type="render",
+                product_base_type=self._context.data["productBaseType"],
                 product_type="render",
-                host_name="deadline_cloud",
+                host_name=self._context.data["hostName"],
                 variant=variant,
             )
 
@@ -368,11 +390,12 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
                     label="",
                     name=variant,
                     family="render",
-                    families=["render"],
+                    families=["render", "review"],
                     folderPath=self._context.data["folderPath"],
                     task=self._context.data["task"],
                     variant=variant,
-                    productBaseType="render",
+                    productBaseType=self._context.data["productBaseType"],
+                    productType=self._context.data["productBaseType"],
                     productName=product_name,
                     trait_representations=[
                         r.trait for r in representations],
@@ -433,10 +456,10 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
                 project_name=self._context.data["projectName"],
                 folder_entity=self._folder_entity,
                 task_entity=self._task_entity,
-                product_base_type="render",
+                product_base_type=self._context.data["productBaseType"],
                 product_type="render",
-                host_name="deadline_cloud",
-                variant=common_prefix,
+                host_name=self._context.data["hostName"],
+                variant=self._context.data["productVariant"],
             )
 
             return [
@@ -449,8 +472,9 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
                     families=["render"],
                     folderPath=self._context.data["folderPath"],
                     task=self._context.data["task"],
-                    variant=common_prefix,
-                    productBaseType="render",
+                    variant=self._context.data["productVariant"],
+                    productBaseType=self._context.data["productBaseType"],
+                    productType=self._context.data["productBaseType"],
                     productName=product_name,
                     trait_representations=[
                         r.trait for r in representations],
@@ -471,24 +495,25 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
                 project_name=self._context.data["projectName"],
                 folder_entity=self._folder_entity,
                 task_entity=self._task_entity,
-                product_base_type="render",
+                product_base_type=self._context.data["productBaseType"],
                 product_type="render",
-                host_name="deadline_cloud",
-                variant=representations.trait.name,
+                host_name=self._context.data["hostName"],
+                variant=self._context.data["productVariant"],
             )
 
             instances.append(
                 InstanceData(
                     publish=True,
                     active=True,
-                    label="",
+                    label="Individual products",
                     name=representations.trait.name,
                     family="render",
-                    families=["render"],
+                    families=["render", "review"],
                     folderPath=self._context.data["folderPath"],
                     task=self._context.data["task"],
-                    variant=representations.trait.name,
-                    productBaseType="render",
+                    variant=self._context.data["productVariant"],
+                    productBaseType=self._context.data["productBaseType"],
+                    productType=self._context.data["productBaseType"],
                     productName=product_name,
                     trait_representations=[representations.trait],
                     standard_representations=[representations.standard],
@@ -541,3 +566,48 @@ class CreateInstancesFromFiles(pyblish.api.ContextPlugin):
             instances += self._handle_collections(cols)
 
         return instances
+
+    def _add_time_info(self, instance: pyblish.api.Instance) -> None:
+        """Add time-related info to the instance.
+
+        This is needed for other plugins using time information
+        like extract review.
+
+        Context like frame start and frame end is filled in by
+        CollectContextEntities but instance specific is not.
+
+        This method will take representations from instance and try to
+        find frame range and add it to the instance. Instance can have
+        multiple representations so there is no good way around it
+        currently, but we can try to find frame range in all representations
+        and use the longest one perhaps?
+
+        Args:
+            instance: pyblish instance to add the time info to.
+
+        """
+        reps = get_trait_representations(instance)
+        frame_starts = []
+        frame_ends = []
+        for rep in reps:
+            with suppress(MissingTraitError):
+                fr: FrameRanged = rep.get_trait(FrameRanged)
+                frame_starts.append(fr.frame_start)
+                frame_ends.append(fr.frame_end)
+
+        if frame_starts:
+            instance.data["frameStart"] = min(frame_starts)
+
+        if frame_ends:
+            instance.data["frameEnd"] = max(frame_ends)
+
+        # fps must be taken currently from server
+        folder_entity = ayon_api.get_folder_by_path(
+            project_name=self._context.data["projectName"],
+            folder_path=self._context.data["folderPath"],
+        )
+
+        if not folder_entity:
+            return
+
+        instance.data["fps"] = folder_entity["attrib"].get("fps", None)
