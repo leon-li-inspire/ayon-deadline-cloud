@@ -1,5 +1,5 @@
-site_name: ayon-addon-template
-repo_url: https://github.com/ynput/ayon-addon-template
+site_name: ayon-deadline-cloud
+repo_url: https://github.com/ynput/ayon-deadline-cloud
 
 nav:
   - Home: index.md
@@ -34,10 +34,17 @@ extra_css: [css/custom.css]
 markdown_extensions:
   - mdx_gh_links
   - pymdownx.snippets
+  - pymdownx.superfences:
+        # make exceptions to highlighting of code:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:mermaid2.fence_mermaid_custom
 
 plugins:
   - search
   - offline
+  - mermaid2
   - mkdocs-autoapi:
       autoapi_dir: ./
       autoapi_add_nav_entry: Reference
