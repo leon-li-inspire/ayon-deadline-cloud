@@ -14,7 +14,13 @@ The key architectural principle is **separation of responsibilities**: AYON owns
 
 - **Studio-configurable validations**: Pre-submission validation plugins that run before any resource-intensive operations. Includes both built-in technical validations (renderable camera exists, valid frame range) and studio-defined custom validations (required AOVs, render settings checks).
 - **Publishing and processing results**: Version registration in AYON, transcoding, reviewable creation, burnins, file movement/renaming via path templates.
-- **Post-render publishing via on-prem CMF worker**: The render job includes a PUBLISH step that runs on an on-prem customer-managed fleet (CMF) worker. The worker downloads render outputs from S3 via the Deadline Cloud credential chain (no VPN needed) and runs the publish pipeline locally. This keeps the full render→publish flow within a single Deadline Cloud job.
+- **Post-render publishing on a Deadline Cloud worker**: The render job includes a PUBLISH step that runs on a Deadline Cloud worker, with a step dependency on RENDER, so the full render→publish flow stays inside a single Deadline Cloud job. Two worker shapes are in scope and share the same OJD job template:
+  - **SMF publish worker** (the PoC target): a transient service-managed-fleet worker that installs the **AYON Launcher conda package** from a conda channel at session start, runs it **headless** for the publish step, and reaches the AYON server over a configured network path. See [Runtime and Bundle Distribution](#runtime-and-bundle-distribution) and [AYON Server Connectivity](#ayon-server-connectivity).
+  - **On-prem CMF publish worker**: an on-prem customer-managed-fleet worker that already sits on the studio network and downloads render outputs from S3 via the Deadline Cloud credential chain (no VPN needed for S3). See [Post-Render Execution Model](#post-render-execution-model).
+- **Runtime and bundle distribution to workers**: Getting the AYON runtime and the studio's bundle onto a worker so the publish step can run — the AYON Launcher as a conda package, the per-studio bundle via job attachments, and conda as the standard environment on both SMF and CMF. See [Runtime and Bundle Distribution](#runtime-and-bundle-distribution).
+- **AYON server connectivity**: A network path from the publish worker to the AYON server, scoped per studio deployment shape (on-prem, AYON-managed cloud, or self-hosted on EC2). See [AYON Server Connectivity](#ayon-server-connectivity).
+
+> **MVP alignment (2026-06-09 Dev Deep Dive — Ynput, AWS, Oehmen Digital Studio).** The publish step is being taken forward **as a PoC to build and validate**, split into two independent halves: (1) **getting AYON + the bundle onto the worker** (Launcher → conda package, owned by AWS/Leon Li; per-studio bundle via a job-attachment pre-hook, owned by Ynput/Ondřej Šamárek), and (2) **reaching the AYON server**, which varies by where the server lives. Conda is the standard environment for both SMF and CMF so a single setup is maintained. Hybrid SMF/CMF is viable but requires synchronized storage. The two new sections below capture each half; the on-prem CMF path documented later remains valid and becomes the "AYON server already on the worker's network" connectivity case. Tracking: discussion [#26](https://github.com/ynput/ayon-deadline-cloud/discussions/26).
 
 ### Deferred (Post-MVP)
 
@@ -171,6 +177,124 @@ The post-render script accesses rendered outputs via:
 ### Storage Configuration
 
 The `StorageConfig` in farm profiles determines which storage method is used and how paths are resolved. See the `StorageConfig` data model below.
+
+## Runtime and Bundle Distribution
+
+For a worker to run the publish step it needs the AYON runtime plus the studio's bundle (the immutable set of add-on versions, settings, and dependency package the job was submitted against). On a workstation or an on-prem CMF worker this is already present. On a transient SMF worker it is not, and re-downloading hundreds of MB to GB from the AYON server on every short-lived worker is a cost and server-load problem. The 2026-06-09 alignment splits the solution into two independent artifacts plus a shared environment standard.
+
+### What ships, and how
+
+| Concern | Approach | Owner |
+|---|---|---|
+| AYON runtime on **all worker types (SMF + CMF + on-prem)** | A **full AYON Launcher conda package** built from the [ayon-launcher hatch build](https://github.com/ynput/ayon-launcher/pull/303) and packaged as a Deadline Cloud conda package (platform-specific `linux-64` + `win-64`, ~800 MB–1 GB). Installed from a conda channel by the queue's conda environment at session start; **run headless** on SMF publish workers (`ayon --headless …`) and used the same package on CMF/on-prem/workstation (where it can also drive the GUI). Immutable, never self-updates on a worker. First version: [aws-deadline/deadline-cloud-samples#237](https://github.com/aws-deadline/deadline-cloud-samples/pull/237) — verified on Linux + Windows SMF workers. | AWS (Leon Li) |
+| Per-studio **bundle** (add-ons + deps, a few hundred MB) | Shipped as **job-attachment inputs** by a pre-submission hook that reuses the same AYON resolve/download functions the Launcher already uses to fetch a bundle. First submit uploads; later submits hit the **content-hash cache**, so they are fast. AYON env vars point the runtime at the cached files wherever they land (S3, fileshare, mount). | Ynput (Ondřej Šamárek) |
+| Environment standard | **Conda on both SMF and CMF**, so a single environment setup is maintained rather than two. | Shared |
+
+Full reasoning, the rejected "ship the full cx_Freeze launcher to SMF" option, the conda-immutability and auto-update-determinism arguments, and the SMF privilege model are in [`launcher-distribution.md`](./launcher-distribution.md). **Note:** that doc's working-notes conclusion favored a *separate slim headless `ayon-publish` package* for SMF; the 2026-06-09 call and PR #237 instead landed on packaging the **full Launcher** as a conda package and running it headless on SMF (simpler — one artifact for all fleet types, bundle handled separately via job attachments). The headless-package option is retained there as superseded rationale. The key decision holds: **render-farm workers pin the runtime + addon versions at submission time and never self-update mid-job** — the Launcher conda package version (plus the bundle name) is the pin.
+
+### Distribution flow
+
+```mermaid
+flowchart LR
+    subgraph Submit[At submission - artist workstation]
+        Bundle[Resolve studio bundle<br/>add-ons + deps] --> Hook[Job-attachment pre-hook<br/>reuses AYON resolve/download]
+        Hook --> Pin[Pin Launcher pkg version<br/>+ bundle name on the job]
+    end
+
+    subgraph Channels[Conda channels]
+        Ynput[YNPUT S3 channel<br/>AYON Launcher conda pkg]
+        Studio[Studio S3 channel<br/>custom packages - optional]
+        AWS[deadline-cloud channel<br/>DCC + adaptor packages]
+    end
+
+    subgraph Worker[SMF publish worker - session start]
+        QEnv[Conda queue environment] -->|install pinned pkgs| Env[Read-only conda env<br/>AYON Launcher]
+        JA[Job attachments<br/>content-hash cached] -->|stage bundle| Session[Session dir - writable]
+        Env --> Run[ayon --headless<br/>deadline_cloud publish]
+        Session --> Run
+    end
+
+    Pin --> QEnv
+    Pin --> JA
+    Ynput --> QEnv
+    Studio --> QEnv
+    AWS --> QEnv
+```
+
+> **Infrastructure dependency.** SMF publish workers install the AYON Launcher conda package (and any custom packages) from S3-backed conda channels, so the **queue role must allow `s3:GetObject` / `s3:ListBucket` on those channel buckets** — including the YNPUT-owned channel, which is a **remote (cross-account) bucket today and is expected to become public-read soon**. Provisioning that access (alongside the conda queue environment, VPC egress, and the connectivity path below) is the [terraform-modules-studio-infra](https://github.com/oehmen/terraform-modules-studio-infra) deployment work scoped separately.
+
+## AYON Server Connectivity
+
+Distributing the runtime and the bundle (above) is independent from the publish worker **reaching the AYON server** to register versions and pull what it needs. The on-prem CMF path solves this implicitly — the worker already sits on the studio network. An SMF publish worker does not, so the connectivity path depends on **where the AYON server lives**. Three deployment shapes cover the field; cover all, validate the most probable first.
+
+```mermaid
+flowchart TD
+    Q{Where does the<br/>AYON server live?}
+
+    Q -->|On-prem<br/>studio network| OnPrem
+    Q -->|AYON-managed<br/>cloud / SaaS| Saas
+    Q -->|Self-hosted<br/>on EC2| Ec2
+    Q -->|Worker is on-prem CMF<br/>already on the network| Cmf
+
+    subgraph OnPrem[On-prem AYON server]
+        OnPrem1[SMF worker in studio VPC] --> OnPrem2[VPN tunnel<br/>or VPC Lattice resource endpoint]
+        OnPrem2 --> OnPrem3[Reach AYON server<br/>on studio LAN]
+    end
+
+    subgraph Saas[AYON-managed cloud]
+        Saas1[SMF worker] --> Saas2[Public HTTPS endpoint<br/>token auth]
+        Saas2 --> Saas3[AYON SaaS server]
+        Saas1 -. hybrid storage .-> Saas4[On-prem fileshare<br/>three-way sync]
+    end
+
+    subgraph Ec2[Self-hosted on EC2]
+        Ec21[SMF worker] --> Ec22[SSM Session Manager<br/>no inbound VPN]
+        Ec22 --> Ec23[AYON server on EC2]
+    end
+
+    subgraph Cmf[On-prem CMF worker]
+        Cmf1[Publish runs on the studio LAN] --> Cmf2[Direct local reach<br/>no extra connectivity]
+    end
+```
+
+| Scenario | Server location | Connectivity mechanism | Notes |
+|---|---|---|---|
+| **A. On-prem AYON server** | Studio datacenter / LAN | **VPN** (site-to-site / client) **or VPC Lattice** resource endpoint to the on-prem service | Most common for established studios. A working PoC exists (below). |
+| **B. AYON-managed cloud** | Ynput-managed SaaS | **Public HTTPS endpoint** with token auth — no tunnel needed for the server connection | For hybrid storage, an on-prem fileshare joins as a three-way setup; do not move the full job-attachment payload over the server link. |
+| **C. Self-hosted on EC2** | Studio's own AWS account | **SSM Session Manager** instead of a VPN — outbound-only, no inbound listener or bastion | Lowest-friction cloud-to-cloud path when the studio already runs AYON on EC2. |
+| **D. On-prem CMF worker** | Any (worker is on the LAN) | **Direct local reach** — the publish worker is already on the studio network | This is the existing on-prem CMF design; connectivity is implicit. |
+
+### Validated PoC — SMF worker → on-prem AYON server (Scenario A)
+
+A working proof of concept for the SMF→on-prem case has been built and validated (kept locally; it contains account IDs and instance details and is **not committed**). The publish worker in the cloud VPC reaches an on-prem AYON server through a **VPC Lattice resource endpoint** fronting an **EC2 reverse proxy**, which carries the connection to the studio over a **reverse SSH tunnel**. The shape is below; concrete IDs/IPs are intentionally omitted.
+
+```mermaid
+sequenceDiagram
+    participant W as SMF publish worker<br/>(cloud VPC)
+    participant L as VPC Lattice<br/>resource endpoint
+    participant P as Reverse-proxy EC2<br/>(cloud VPC)
+    participant T as Reverse SSH tunnel
+    participant A as On-prem AYON server<br/>(studio LAN)
+
+    W->>L: HTTPS to AYON server name
+    L->>P: forward to reverse proxy
+    P->>T: proxy over established tunnel
+    Note over T,A: tunnel opened outbound<br/>from on-prem - no inbound firewall rule
+    T->>A: reach AYON REST API
+    A-->>W: version register / bundle resolve responses
+```
+
+Key properties: the tunnel is established **outbound from on-prem**, so the studio opens no inbound firewall rule; VPC Lattice gives the worker a stable in-VPC endpoint decoupled from the proxy's address; and the path carries only the AYON **server** connection (REST/auth), not the bulk job-attachment payload — that still flows worker↔S3 per [Runtime and Bundle Distribution](#runtime-and-bundle-distribution).
+
+### Hybrid SMF/CMF note
+
+Hybrid SMF/CMF (on-prem CMF baseline, SMF for scale-out) is viable and increasingly common for distributed studios, **but only with synchronized storage**. Without it, on-prem workers pull the whole payload from cloud S3, which becomes the bottleneck. VPN / VPC Lattice / SSM are for the **AYON-server connection**, not for moving the full job-attachment payload.
+
+### Open questions
+
+1. Which connectivity scenario is the primary MVP validation target beyond the Scenario A PoC — confirm the most probable studio shape first.
+2. For Scenario A, VPN vs VPC Lattice as the recommended default, and what the studio-side prerequisites are for each.
+3. How the chosen connectivity path is provisioned and parameterized in [terraform-modules-studio-infra](https://github.com/oehmen/terraform-modules-studio-infra) (VPC Lattice resource config, egress, queue-role S3 access for the conda channels).
 
 ## Components and Interfaces
 
@@ -340,6 +464,8 @@ class CollectedRenderInstance:
 ### Component 3: Submitter Bridge (`client/plugins/submit_to_deadline_cloud.py`)
 
 **Purpose**: Bridge between AYON's publish pipeline and the Deadline Cloud Submitter tool. Maps AYON render instances to Submitter parameters, pre-populates settings, and invokes submission. The Submitter collects scene data, presents them in its UI, and creates an Open Job Description (OJD) job bundle — a grouped OJD template with asset references, parameter values, and additional files needed by the job. The job bundle is then submitted via the Deadline Cloud Python API.
+
+> **Forward-looking — unified submitter API.** Today the bridge reaches the per-DCC submitter functions through AYON's forked submitters. AWS has posted a first-version [unified submitter API design](https://github.com/ynput/ayon-deadline-cloud/discussions/17#discussioncomment-17272843) (discussion [#17](https://github.com/ynput/ayon-deadline-cloud/discussions/17)): an abstract `SubmitterAPI` (with `get_submission_context()`), a `SubmitterSettings` base dataclass, a frozen `SubmissionContext`, and a `get_submitter_api(host_name)` factory, all in the shared `deadline-cloud` library and DCC-agnostic/headless. Once available, this bridge should consume `get_submitter_api(...).get_submission_context()` instead of importing forked submitter modules — retiring the per-DCC forks. This is tracked as the secondary (post-publish) workstream and does not change the data this component produces.
 
 ```python
 class SubmitterBridge:

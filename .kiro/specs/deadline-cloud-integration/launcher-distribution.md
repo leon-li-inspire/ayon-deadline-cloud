@@ -3,6 +3,8 @@
 > Working notes — exploring distribution paths for AYON Launcher on Deadline Cloud workers.
 > Context: discussion in [wg-deadline-cloud thread](https://discord.com/channels/517362899170230292/1496527767217377430) and [ayon-launcher PR #303](https://github.com/ynput/ayon-launcher/pull/303).
 
+> **Status (2026-06-12): rationale record — partially superseded.** This is the decision-rationale behind the [Runtime and Bundle Distribution](./design.md#runtime-and-bundle-distribution) section of `design.md` (rejected options, the conda-immutability and auto-update-determinism arguments, the SMF privilege model — all still valid). **However, its headline conclusion — ship a *separate slim headless `ayon-publish` package* to SMF — was NOT the path taken.** The 2026-06-09 Dev Deep Dive and Leon's [deadline-cloud-samples#237](https://github.com/aws-deadline/deadline-cloud-samples/pull/237) instead package the **full AYON Launcher** as a conda package and run it **headless** on SMF (one artifact for all fleet types; the per-studio bundle ships separately via job attachments). Read the reasoning below as the "why," but treat the headless-package conclusion as superseded by the full-Launcher decision.
+
 ## TL;DR
 
 After thinking through it and seeing two parallel pieces of work converge:
@@ -191,6 +193,8 @@ sequenceDiagram
 ---
 
 ## Update — convergence on a headless publish package
+
+> **Superseded (2026-06-12).** The convergence below favored a separate slim headless `ayon-publish` package for SMF. The 2026-06-09 call and [deadline-cloud-samples#237](https://github.com/aws-deadline/deadline-cloud-samples/pull/237) instead packaged the **full AYON Launcher** as a conda package and run it headless on SMF + CMF. The reasoning here (immutability, no self-update, read-only `$CONDA_PREFIX`) still applies to the full-Launcher package; the "tens of MB pure-Python" sizing and the separate-artifact framing do not. Kept for history.
 
 After this doc went out, two things happened in close sequence in the wg-deadline-cloud thread:
 
