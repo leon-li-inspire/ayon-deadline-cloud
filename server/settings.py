@@ -9,6 +9,8 @@ DEFAULT_VALUES: dict[str, Any] = {
     "conda_packages": "",
     "conda_channels": "deadline-cloud",
     "extra_job_parameters": [],
+    "publish_host_requirement_roles": ["publish"],
+    "render_host_requirement_roles": ["render"],
 }
 
 
@@ -80,5 +82,25 @@ class DeadlineCloudSettings(BaseSettingsModel):
             "submission. These override any value already present for the "
             "same parameter name. The parameter must exist in the job "
             "template's parameterDefinitions."
+        ),
+    )
+
+    publish_host_requirement_roles: list[str] = SettingsField(
+        default_factory=list,
+        title="Publish Host Requirement Roles",
+        description=(
+            "When submitting job to Deadline Cloud, the publishing step "
+            "will run only on machine (or fleet) that has this set as "
+            "Worker Capability."
+        ),
+    )
+
+    render_host_requirement_roles: list[str] = SettingsField(
+        default_factory=list,
+        title="render Host Requirement Roles",
+        description=(
+            "When submitting job to Deadline Cloud, the render step "
+            "will run only on machine (or fleet) that has this set as "
+            "Worker Capability."
         ),
     )

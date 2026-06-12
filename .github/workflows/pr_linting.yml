@@ -27,7 +27,8 @@ jobs:
         with:
           files: |
             **.py
-      - uses: astral-sh/ruff-action@v3
+      - if: steps.changed-files.outputs.all_changed_files != ''
+        uses: astral-sh/ruff-action@v3
         with:
           version-file: "pyproject.toml"
           src: ${{ steps.changed-files.outputs.all_changed_files }}

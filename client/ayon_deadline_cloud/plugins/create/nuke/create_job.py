@@ -1,68 +1,28 @@
 """Create Deadline Cloud Job."""
 from __future__ import annotations
 
-import os
-from typing import TYPE_CHECKING, Any, Type
+from pathlib import Path
+from typing import Any, Type
 
 from ayon_core.lib import (
     AbstractAttrDef,
     BoolDef,
+    EnumDef,
     NumberDef,
     TextDef,
 )
-from ayon_maya.api import plugin
-from deadline.maya_submitter.scene import Scene
-from maya import cmds
-
-if TYPE_CHECKING:
-    from ayon_core.pipeline import CreatedInstance
+from ayon_nuke.api import NukeCreator
 
 
-class CreateDeadlineCloudJob(plugin.MayaCreator):
-    """Creator plugin for AWS Deadline Cloud Render Job."""
-    identifier = "io.ayon.create.deadline_cloud_job"
+class CreateDeadlineCloudJob(NukeCreator):
+    """Creator plugin to create a backdrop node representing
+    Deadline Cloud Job instance.
+    """  # noqa: D205
+    identifier = "deadline_cloud_job"
     label = "Deadline Cloud Render Job"
     product_base_type = "deadline_cloud"
     product_type = product_base_type
     icon = "cube"
-
-    def create(
-            self,
-            product_name: str,
-            instance_data: dict,
-            pre_create_data: dict) -> CreatedInstance:
-        """Create Deadline Cloud Job.
-
-        This is needed just to bypass default Maya validator that checks
-        whether instance is empty or not. We bypass it by creating empty
-        set under the instance set. This is possible because the instance
-        itself is not integrated later on.
-
-        Args:
-            product_name (str): Name of the product.
-            instance_data (dict): Instance data.
-            pre_create_data (dict): Pre-create data.
-
-        Returns:
-            CreatedInstance: Created instance.
-
-        """
-        instance = super().create(product_name, instance_data, pre_create_data)
-        instance_node = instance.get("instance_node")
-        dummy_set = cmds.sets(name="empty_dummy_set", empty=True)
-        cmds.sets([dummy_set], forceElement=instance_node)
-
-        # Ensure ProjectPath and OutputFilePath are set from AYON context
-        work_dir = self._get_ayon_work_dir()
-        if work_dir:
-            creator_attrs = instance.creator_attributes
-            if not creator_attrs.get("ProjectPath"):
-                creator_attrs["ProjectPath"] = Scene.project_path() or work_dir
-            if not creator_attrs.get("OutputFilePath"):
-                creator_attrs["OutputFilePath"] = (
-                    Scene.output_path() or work_dir)
-
-        return instance
 
     def _load_job_data(self) -> list[Type[AbstractAttrDef]]:
         """Load job template and parameters.
@@ -74,31 +34,22 @@ class CreateDeadlineCloudJob(plugin.MayaCreator):
             list[Type[AbstractAttrDef]]
 
         """
-        from deadline.maya_submitter.data_classes import (
-            RenderSubmitterUISettings,
+        from deadline.nuke_submitter.data_classes import (
+            SubmitterUISettings,
         )
-        from deadline.maya_submitter.maya_render_submitter import (
+        from deadline.nuke_submitter.deadline_submitter_for_nuke import (
             get_job_template_for_submission,
             get_parameter_values_for_submission,
             get_queue_parameters,
         )
 
-        settings = RenderSubmitterUISettings()
-
-        # Populate project and output paths from scene settings
-        work_dir = self._get_ayon_work_dir()
-        if work_dir:
-            settings.project_path = Scene.project_path() or work_dir
-            settings.output_path = Scene.output_path() or work_dir
-
+        settings = SubmitterUISettings()
         queue_parameters: list[dict[str, Any]] = get_queue_parameters()
-
         # this would be 'job_bundle/template.yaml'
         job_template = get_job_template_for_submission(settings)
         # this would be 'job_bundle/parameter_values.yaml'
         parameter_values = get_parameter_values_for_submission(
             settings, queue_parameters)
-
         parameter_values_dict = {
             i["name"]: i["value"]
             for i in parameter_values
@@ -121,7 +72,8 @@ class CreateDeadlineCloudJob(plugin.MayaCreator):
             self.log.debug("%s(%s): %s",
                            label, param_def["name"], value)
             if param_def["type"] in {"STRING", "PATH"}:
-                if param_def["userInterface"]["control"] == "CHECK_BOX":
+                control = param_def.get("userInterface", {}).get("control", "")
+                if control == "CHECK_BOX":
                     out.append(
                         BoolDef(
                             label=label,
@@ -129,7 +81,21 @@ class CreateDeadlineCloudJob(plugin.MayaCreator):
                             default=bool(value == "true"),
                         )
                     )
+                elif control == "DROPDOWN_LIST":
+                    out.append(
+                        EnumDef(
+                            label=label,
+                            key=param_def["name"],
+                            items=param_def["allowedValues"],
+                            default=value,
+                        )
+                    )
                 else:
+                    value = (
+                        Path(value).as_posix()
+                        if param_def["type"] == "PATH"
+                        else value
+                    )
                     out.append(
                         TextDef(
                             label=label,
@@ -157,17 +123,11 @@ class CreateDeadlineCloudJob(plugin.MayaCreator):
         """
         return self._load_job_data()
 
-    @staticmethod
-    def _get_ayon_work_dir() -> str:
-        """Get the AYON work directory for the current context.
+    def get_pre_create_attr_defs(self) -> list[Type[AbstractAttrDef]]:  # noqa: PLR6301
+        """Get attribute definitions for pre-create step.
 
         Returns:
-            The current work directory path, or empty string on failure.
-
+            list[Type[AbstractAttrDef]]: List of attribute definitions for
+                pre-create step
         """
-        work_dir = os.getenv("AYON_WORKDIR", "")
-        if work_dir:
-            return work_dir
-
-        # Fallback: use Maya workspace
-        return cmds.workspace(query=True, rootDirectory=True) or ""
+        return []

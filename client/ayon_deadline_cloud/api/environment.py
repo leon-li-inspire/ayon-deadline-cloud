@@ -89,6 +89,80 @@ class HostCondaPackages:
 
         return packages
 
+    def _get_conda_pkgs_for_houdini(self) -> list[str]:  # noqa: PLR6301
+        """Get a list of conda packages for Houdini.
+
+        Returns:
+            A list of conda packages for Houdini
+
+        """
+        from deadline_cloud_for_houdini._version import (  # noqa: PLC2701
+            version_tuple as adaptor_version_tuple,
+        )
+
+        packages: list[str] = []
+        try:
+            import hou  # ty:ignore[unresolved-import]
+
+            houdini_version = hou.applicationVersionString().rsplit(".", 1)[0]
+        except Exception:  # noqa: BLE001
+            houdini_version = None
+
+        # note: this is used to get the version of the adaptor, which is
+        # not necessarily the same as the Houdini version. Sometimes it happens
+        # that the version in dev build is set incorrectly? to 0.0 and then
+        # the submitted jobs will fail because that conda package can't be
+        # found in the default conda channel. This simple fix will release
+        # the version constrain in that case.
+        adaptor_version = ".".join(str(v) for v in adaptor_version_tuple[:2])
+        adaptor_version = f"={adaptor_version}.*"
+        if adaptor_version_tuple[0] == 0 and adaptor_version_tuple[1] == 0:
+            adaptor_version = ""
+        packages.extend(
+            (
+                f"houdini={houdini_version}.*",
+                f"houdini-openjd{adaptor_version}",
+            ))
+
+        return packages
+
+    def _get_conda_pkgs_for_nuke(self) -> list[str]:  # noqa: PLR6301
+        """Get a list of conda packages for Nuke.
+
+        Returns:
+            A list of conda packages for Nuke
+
+        """
+        from deadline.nuke_submitter._version import (  # noqa: PLC2701
+            version_tuple as adaptor_version_tuple,
+        )
+
+        packages: list[str] = []
+        try:
+            import nuke  # ty:ignore[unresolved-import]
+
+            nuke_version = nuke.NUKE_VERSION_MAJOR
+        except Exception:  # noqa: BLE001
+            nuke_version = None
+
+        # note: this is used to get the version of the adaptor, which is
+        # not necessarily the same as the Nuke version. Sometimes it happens
+        # that the version in dev build is set incorrectly? to 0.0 and then
+        # the submitted jobs will fail because that conda package can't be
+        # found in the default conda channel. This simple fix will release
+        # the version constrain in that case.
+        adaptor_version = ".".join(str(v) for v in adaptor_version_tuple[:2])
+        adaptor_version = f"={adaptor_version}.*"
+        if adaptor_version_tuple[0] == 0 and adaptor_version_tuple[1] == 0:
+            adaptor_version = ""
+        packages.extend(
+            (
+                f"nuke={nuke_version}.*",
+                f"nuke-openjd{adaptor_version}",
+            ))
+
+        return packages
+
 
 def auto_detect_conda_packages(
         host_name: str, job_template: dict[str, Any]) -> str:
