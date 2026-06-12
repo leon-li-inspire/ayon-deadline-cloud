@@ -154,10 +154,9 @@ AWS Deadline Cloud provides two options for managing input and output data:
 Deadline Cloud transfers data to and from Cloud Workers using S3 buckets:
 - **Input sync**: Scene files and assets are uploaded to S3 and synced to workers when the job starts
 - **Output sync**: Rendered outputs are synced back to the workstation when the job finishes
+- **Step-to-step output→input sync (how PUBLISH gets RENDER's outputs)**: Within a single job, the RENDER step's outputs are declared as job-attachment outputs and the dependent PUBLISH step declares the same locations as inputs. The Deadline Cloud worker agent syncs the previous step's session outputs down as the next step's session inputs automatically, **driven by the OpenJD job template** — no CLI download call inside the step, no cron, no separate download configuration. This is the mechanism the publish step relies on.
 - **Linux VFS mount**: On Linux workers, job attachments can be mounted as a virtual filesystem for standard file access
-- **Output retrieval**: The Deadline CLI provides commands to download job outputs, which can be run manually or as a scheduled CRON job
-- **Automatic output downloads (TBD)**: Deadline Cloud supports automatic output downloads via `deadline queue sync-output` configured as a cron job or scheduled task. This requires additional setup: dedicated long-term IAM credentials (not Deadline Cloud Monitor credentials), a storage profile with all output paths configured, and a checkpoint directory for tracking download progress. See [AWS docs: Automatic downloads](https://docs.aws.amazon.com/deadline-cloud/latest/userguide/auto-downloads.html). The exact integration approach (whether AYON manages this configuration or defers to studio-level setup) is TBD.
-- **No direct S3 access**: Render output data is encrypted and cannot be accessed directly from S3 buckets. All output retrieval must go through the Deadline Cloud CLI output download mechanism (e.g., [`deadline job download-output`](https://docs.aws.amazon.com/deadline-cloud/latest/developerguide/getting-output-files-from-a-job.html) or [`deadline queue sync-output`](https://docs.aws.amazon.com/deadline-cloud/latest/userguide/auto-downloads.html)). This is a hard constraint of the job attachments mode.
+- **Output retrieval to a workstation (separate concern)**: Getting outputs back to an artist workstation (outside the job) still uses the Deadline CLI (`deadline job download-output`) manually or on a schedule. This is **not** part of the render→publish flow — the in-job step I/O above covers publishing — so the publish step does not depend on it.
 
 ### Option 2: [Shared Storage (Storage Profiles)](https://docs.aws.amazon.com/deadline-cloud/latest/userguide/storage-profile-shared-file.html)
 
@@ -169,10 +168,10 @@ Uses storage profiles to remap paths between different filesystems and platforms
 
 ### Post-Render Script Access
 
-The post-render script accesses rendered outputs via:
-1. **Job attachments**: Outputs must first be downloaded using the Deadline Cloud CLI (`deadline job download-output`) before any processing. There is no direct S3 access — data is encrypted and can only be retrieved through the CLI download mechanism. This adds a mandatory "download outputs" step as the first operation in the post-render pipeline. Alternatively, if automatic downloads are configured (`deadline queue sync-output` as a cron job), outputs may already be available locally — but this requires additional IAM and storage profile setup (TBD, see [AWS docs](https://docs.aws.amazon.com/deadline-cloud/latest/userguide/auto-downloads.html)).
+The post-render (PUBLISH step) script accesses rendered outputs via:
+1. **Job attachments (step I/O)**: The RENDER step's outputs are delivered to the PUBLISH step as that step's job-attachment **inputs**, synced into the session by the worker agent before the step script runs (declared in the job template). The script reads them from the session input location directly — **no explicit download call, no `deadline queue sync-output` cron, no extra IAM/storage-profile setup**. Encryption-at-rest in S3 is transparent here because the agent performs the sync within the job's credential context.
 2. **Shared storage**: Direct filesystem access using remapped paths from storage profiles. No download step required.
-3. **Hybrid**: Combination based on storage configuration — shared storage files are accessed directly, job attachment files require CLI download first.
+3. **Hybrid**: Combination based on storage configuration — shared storage files are accessed directly, job-attachment files arrive as synced step inputs.
 
 ### Storage Configuration
 
@@ -724,8 +723,9 @@ All communication is outbound HTTPS (port 443) to: `scheduling.deadline.{region}
 | Setup | Service/cron infra | CMF fleet + IAM Roles Anywhere | + VPN/Direct Connect/FSx |
 
 **Open questions:**
-- **Job attachment sync between steps**: Does the worker agent automatically sync outputs from a previous step as inputs to a dependent step within the same job? Or does the PUBLISH step script need to explicitly download them via `deadline job download-output`? This needs testing.
 - **IAM Roles Anywhere setup complexity**: For studios without an existing PKI/CA, setting up IAM Roles Anywhere adds infrastructure overhead. AWS Private CA is an option but has cost implications. For smaller studios, time-bound IAM user keys may be the pragmatic starting point.
+
+> **Resolved — job-attachment sync between steps.** Earlier this was an open question. The design now relies on the worker agent syncing the RENDER step's session outputs as the PUBLISH step's session inputs automatically, declared in the OpenJD job template (step output → dependent step input). The PUBLISH step does **not** call `deadline job download-output`, and **no** `deadline queue sync-output` automatic-download configuration is required. See [Storage and Data Transfer](#storage-and-data-transfer).
 
 **Purpose**: Handles output validation, transcoding, burnin application, and version registration in AYON after rendering completes. May run as a Deadline Cloud dependent step (on farm) or locally within the AYON pipeline (see TBD above).
 
@@ -741,19 +741,23 @@ Publishing is the process where a version is registered in AYON. Beyond registra
 class PostRenderProcessor:
     """Handles post-render pipeline on the farm."""
 
-    def download_outputs(
+    def resolve_output_inputs(
         self, config: PostRenderConfig
     ) -> list[str]:
-        """Download render outputs via Deadline Cloud CLI.
+        """Resolve the RENDER outputs that were synced into this step.
 
-        Required for job attachments mode — outputs are encrypted in S3
-        and can only be retrieved through the Deadline Cloud CLI
-        (e.g., `deadline job download-output`).
+        In the single-job RENDER→PUBLISH model the worker agent syncs the
+        RENDER step's session outputs down as this (PUBLISH) step's session
+        inputs before the script runs, driven by the OpenJD job template.
+        This method just resolves their local session-input path(s) — there
+        is no CLI download (`deadline job download-output`) and no
+        `deadline queue sync-output` cron involved.
 
-        For shared storage mode, this is a no-op that returns the
-        expected file paths directly (files are already accessible).
+        For shared storage mode it returns the remapped paths directly
+        (files already accessible). For job-attachments mode it returns the
+        synced session-input location.
 
-        Returns the local file paths of downloaded/accessible outputs.
+        Returns the local file paths of the accessible outputs.
         """
         ...
 
@@ -893,16 +897,11 @@ class StorageConfig:
     auto_sync_inputs: bool = True
     auto_sync_outputs: bool = True
     use_vfs_on_linux: bool = False
-    
-    # Output retrieval settings
+
+    # Workstation output-retrieval (separate concern; NOT used by the PUBLISH
+    # step — the render→publish flow uses in-job step output→input sync).
     output_download_method: str = "manual"  # "manual", "cron", "on_complete"
     cron_schedule: str | None = None        # e.g., "*/15 * * * *"
-    
-    # Automatic download settings (TBD — requires dedicated IAM credentials
-    # and storage profile configuration, see AWS docs: Automatic downloads)
-    auto_download_enabled: bool = False
-    auto_download_checkpoint_dir: str | None = None  # Checkpoint dir for sync-output tracking
-    auto_download_aws_profile: str | None = None     # AWS credentials profile name (e.g., "deadline-downloader")
 
 @dataclass
 class PathMapping:
@@ -1162,14 +1161,14 @@ def execute_post_render(config: PostRenderConfig, settings: PostRenderSettings):
     when all render tasks have succeeded.
     """
 
-    # Step 1: Download render outputs (mandatory for job attachments mode)
-    # In job attachments mode, outputs are encrypted in S3 and must be
-    # retrieved via the Deadline Cloud CLI before any processing.
-    # In shared storage mode, this is a no-op (files already accessible).
+    # Step 1: Resolve render outputs synced into this step as inputs.
+    # In job-attachments mode the worker agent has already synced the RENDER
+    # step's session outputs to this (PUBLISH) step's session-input location,
+    # per the OpenJD job template — no CLI download, no sync-output cron.
+    # In shared storage mode, files are directly accessible via remapped paths.
     if config.storage_config.storage_mode in ("job_attachments", "hybrid"):
-        local_paths = download_outputs_via_cli(config)
-        # Uses: deadline job download-output
-        assert len(local_paths) > 0, "No outputs downloaded from Deadline Cloud"
+        local_paths = resolve_step_input_paths(config)  # session inputs synced by the agent
+        assert len(local_paths) > 0, "No RENDER outputs present as PUBLISH step inputs"
     else:
         # Shared storage: files are directly accessible via remapped paths
         local_paths = config.expected_files
@@ -1428,8 +1427,9 @@ else:
 # Example 3: Post-render script execution (on farm worker)
 processor = PostRenderProcessor()
 
-# Step 0: Download outputs first (required for job attachments mode)
-local_files = processor.download_outputs(config)
+# Step 0: Resolve RENDER outputs already synced in as this step's inputs
+# (worker agent did the sync per the job template — no CLI download).
+local_files = processor.resolve_output_inputs(config)
 
 # Then proceed with discovery, validation, and publishing
 outputs = processor.discover_outputs(local_files)
