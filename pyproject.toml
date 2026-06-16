@@ -19,6 +19,12 @@ dependencies = [
     "pytest",
     "codespell",
     "pyblish-base>=1.8.12",
+    "boto3",
+    "botocore",
+    "xxhash",
+    "deadline-cloud",
+    "ayon-python-api",
+    "boto3-stubs~=1.43.30",
 ]
 
 [tool.ty.environment]
