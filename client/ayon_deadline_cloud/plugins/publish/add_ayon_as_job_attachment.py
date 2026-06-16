@@ -14,13 +14,17 @@ import os
 import platform
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlencode
 
 import ayon_api
-import boto3
 import pyblish.api
 from ayon_core.pipeline.publish import PublishError
+from ayon_deadline_cloud.addon import (
+    DEADLINE_CLOUD_ADDON_ROOT,
+    DeadlineCloudAddon,
+)
 from boto3.s3.transfer import TransferConfig
 from botocore.exceptions import (
     BotoCoreError,
@@ -30,6 +34,7 @@ from deadline import client
 from xxhash import xxh3_128
 
 if TYPE_CHECKING:
+    import boto3
     from logging import Logger
 
     from ayon_api.typing import (
@@ -37,6 +42,8 @@ if TYPE_CHECKING:
         BundlesInfoDict,
         DependencyPackageDict,
     )
+    from boto3.s3 import S3Client
+    from boto3.session import Session
 
 
 CHUNK_SIZE = 8192
@@ -156,6 +163,13 @@ class AddAYONAsJobAttachment(pyblish.api.InstancePlugin):
     families: ClassVar[list[str]] = ["deadline_cloud"]
     log: Logger
 
+    def __init__(self):
+        """Constructor."""
+        super().__init__()
+        self._s3_bucket: str | None = None
+        self._s3_prefix: str | None = None
+        self._s3_client: S3Client | None = None
+
     def process(self, instance: pyblish.api.Instance) -> None:
         """Process this instance.
 
@@ -167,26 +181,14 @@ class AddAYONAsJobAttachment(pyblish.api.InstancePlugin):
 
         """
         settings = instance.context["deadline_cloud_submitter_settings"]
-        session = client.api.get_boto3_session()
+        farm_id = settings["default_farm_id"]
+        queue_id = settings["queue_id"]
+        session: Session = client.api.get_boto3_session()
 
-        # first, find out what is already uploaded
-        (
-            bucket,
-            prefix,
-        ) = self.get_s3_settings_from_queue(
-            session,
-            settings["default_farm_id"],
-            settings["queue_id"]
-        )
-
-        s3_client = session.client("s3")
-
-        try:
-            s3_client.head_bucket(Bucket=bucket)
-            self.log.info("✓ Bucket access confirmed")
-        except ClientError as e:
-            msg = "Cannot access S3 bucket."
-            raise PublishError(msg) from e
+        self._set_s3_session(session, farm_id, queue_id)
+        if not self._s3_client or not self._s3_bucket or not self._s3_prefix:
+            msg = "S3 session is not properly configured."
+            raise PublishError(msg)
 
         # get the dependency package
         bundle_name = os.getenv("AYON_BUNDLE_NAME")
@@ -200,18 +202,123 @@ class AddAYONAsJobAttachment(pyblish.api.InstancePlugin):
             platform_name,
             instance.context.data.get("projectName"),
         )
-        dependency_package.checksum
+        if not dependency_package:
+            msg = "Cannot determine dependency package."
+            raise PublishError(msg)
 
-        dependency_package_path = ayon_api.download_dependency_package(
+        # check for the file first
+        addons_resources_dir = (
+                Path(DEADLINE_CLOUD_ADDON_ROOT).parent.parent / "addons_resources")  # noqa: E501
 
+        resource_dir = addons_resources_dir / DeadlineCloudAddon.name
+        local_dpkg_path = resource_dir / dependency_package.filename
 
+        if not local_dpkg_path.exists():
+            # We need to download it first from the AYON server to calculate
+            # the hash for S3 to check if there is the object and wheter
+            # it is the same
+            downloaded_dpkg = ayon_api.download_dependency_package(
+                src_filename=dependency_package.filename,
+                dst_directory=str(resource_dir),
+                dst_filename=dependency_package.filename,
+                platform_name=platform_name,
+                chunk_size=CHUNK_SIZE,
+            )
+            if not downloaded_dpkg:
+                msg = "Failed to download dependency package from AYON server."
+                raise PublishError(msg)
+            local_dpkg_path = Path(downloaded_dpkg)
+
+        # calculate the hash of the file
+        hasher = xxh3_128()
+        with open(local_dpkg_path, "rb") as f:
+            while chunk := f.read(CHUNK_SIZE):
+                hasher.update(str(chunk))
+        local_hash = hasher.hexdigest()
+
+        if not self.hash_exists_on_s3(
+            local_hash, self._s3_bucket, self._s3_client
+        ):
+            self.log.info(
+                "Uploading dependency package '%s' to S3...",
+                dependency_package.filename,
+            )
+            try:
+                self._s3_client.upload_file(
+                    Filename=str(local_dpkg_path),
+                    Bucket=self._s3_bucket,
+                    Key=f"{self._s3_prefix}/{local_hash}.xxh128",
+                    Config=TransferConfig(multipart_chunksize=CHUNK_SIZE)
+                )
+            except (ClientError, BotoCoreError) as e:
+                msg = "Failed to upload dependency package to S3."
+                raise PublishError(msg) from e
+
+            self.log.info("✓ Upload complete")
+
+    def _set_s3_session(
+            self,
+            session: Session, farm_id: str, queue_id: str) -> None:
+        """Set up S3 session.
+
+        Args:
+            session: S3 session.
+            farm_id: Farm ID.
+            queue_id: Queue ID.
+
+        """
+        (
+            bucket,
+            prefix,
+        ) = self.get_s3_settings_from_queue(
+            session, farm_id, queue_id
         )
 
-        d
+        s3_client: S3Client = session.client("s3")
+
+        s3_client.head_bucket(Bucket=bucket)
+        self.log.info("✓ Bucket access confirmed")
+
+        self._s3_bucket = bucket
+        self._s3_prefix = prefix
+        self._s3_client = s3_client
+
+    @staticmethod
+    def hash_exists_on_s3(
+            file_hash: str, bucket: str, s3_client: S3Client) -> bool:
+        """Check if file exists on S3.
+
+        Args:
+            file_hash: File hash to check.
+            bucket: Bucket to check.
+            s3_client: S3 client.
+
+        Returns:
+            True if file exists on S3.
+
+        Raises:
+            ClientError: When S3 client encounters an error
+                other than 404 Not Found.
+        """
+        # check for the object in S3
+        s3_key = f"DeadlineCloud/Data/{file_hash}.xxh128"
+        try:
+            s3_client.head_object(
+                Bucket=bucket,
+                Key=s3_key,
+            )
+
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code")
+            if error_code == "404":
+                return False
+            raise
+        else:
+            return True
 
     @staticmethod
     def get_s3_settings_from_queue(
-        session: boto3.Session,
+        session: Session,
         farm_id: str,
         queue_id: str,
     ) -> tuple[str, str]:
