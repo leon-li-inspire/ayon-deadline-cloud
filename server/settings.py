@@ -1,7 +1,11 @@
 """Settings for the addon."""
 from typing import Any
 
-from ayon_server.settings import BaseSettingsModel, SettingsField
+from ayon_server.settings import (
+    BaseSettingsModel,
+    MultiplatformPathModel,
+    SettingsField,
+)
 
 DEFAULT_VALUES: dict[str, Any] = {
     "farm_id": "",
@@ -29,6 +33,20 @@ class JobParameterModel(BaseSettingsModel):
         default="",
         title="Value",
     )
+
+
+def _worker_platform_enum() -> list[dict[str, str]]:
+    """Enum for worker platform setting.
+
+    Returns:
+        list of possible worker platforms
+
+    """
+    return [
+        {"value": "linux", "label": "Linux based workers"},
+        {"value": "windows", "label": "Windows based workers"},
+        {"value": "hybrid", "label": "Hybrid setup (both windows and linux)"},
+    ]
 
 
 class DeadlineCloudSettings(BaseSettingsModel):
@@ -71,6 +89,29 @@ class DeadlineCloudSettings(BaseSettingsModel):
             "Space-separated list of Conda channels to search for packages "
             "(e.g. 'deadline-cloud conda-forge'). Overrides the Conda queue "
             "environment default."
+        ),
+    )
+
+    ayon_components_cache_folder: MultiplatformPathModel = SettingsField(
+        default_factory=MultiplatformPathModel,
+        title="AYON Components Cache Folder",
+        description=(
+            "Path to a shared folder that will be used to cache AYON. "
+            "These components are needed by SMF workers and caching them "
+            "helps speedup job submission and reduce transfer costs."
+            "If left empty, local addon resources on submitting machine "
+            "will be used."
+        ),
+    )
+
+    worker_platform: str = SettingsField(
+        enum_resolver=_worker_platform_enum,
+        title="Worker platform",
+        default="linux",
+        description=(
+            "Platform of the Deadline Cloud workers to target. "
+            "This is used to determine the expected platform of the job's"
+            "hosts and speedup of pre-caching AYON environment."
         ),
     )
 
