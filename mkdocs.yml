@@ -4,6 +4,8 @@ repo_url: https://github.com/ynput/ayon-deadline-cloud
 nav:
   - Home: index.md
   - License: license.md
+  - Guides:
+    - AYON Conda Package Guid: conda-package-guide.md
 
 theme:
   name: material
@@ -34,6 +36,8 @@ extra_css: [css/custom.css]
 markdown_extensions:
   - mdx_gh_links
   - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
   - pymdownx.superfences:
       # make exceptions to highlighting of code:
       custom_fences:

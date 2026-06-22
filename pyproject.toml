@@ -21,6 +21,20 @@ dependencies = [
     "pyblish-base>=1.8.12",
 ]
 
+[project.optional-dependencies]
+docs = [
+    "mkdocs-material >= 9.6.7",
+    "mkdocs-autoapi >= 0.4.0",
+    "mkdocstrings-python >= 1.16.2",
+    "mkdocs-minify-plugin >= 0.8.0",
+    "markdown-checklist >= 0.4.4",
+    "mdx-gh-links >= 0.4",
+    "pymdown-extensions >= 10.14.3",
+    "mike >= 2.1.3",
+    "mkdocstrings-shell >= 1.0.2",
+    "mkdocs-mermaid2-plugin>=1.2.3",
+]
+
 [tool.ty.environment]
 extra-paths = [
     "../ayon-core/client",
