@@ -92,7 +92,7 @@ class CollectDeadlineCloudJobData(
             )
         ]
 
-    def process(self, instance: pyblish.api.Instance) -> None:  # noqa: PLR0914, PLR0915
+    def process(self, instance: pyblish.api.Instance) -> None:  # noqa: C901, PLR0914, PLR0915
         """Collect job data from Deadline Submitter UI.
 
         Args:
@@ -202,6 +202,17 @@ class CollectDeadlineCloudJobData(
                 "adding product base type: %s",
                 instance.data.get("productBaseType", ""),
             )
+        if "variant" not in template_param_names:
+            self.add_ayon_context_parameter(
+                template_param_defs,
+                name="variant",
+                default=instance.data.get("variant", ""),
+                description="product variant",
+            )
+            template_param_names.add("variant")
+            self.log.debug(
+                "adding variant: %s", instance.data.get("variant", "")
+            )
         if "OutputFilePath" not in template_param_names:
             output_path = self._resolve_output_path(
                 set(settings.output_directories)
@@ -243,7 +254,14 @@ class CollectDeadlineCloudJobData(
             asset_references
         )
 
+        # Provide both camelCase and snake_case keys: downstream plugins are
+        # inconsistent (submit_to_deadline_cloud + add_publish_job_step read
+        # camelCase; other callers read snake_case). Writing both avoids a
+        # KeyError regression on either path.
         instance.data["deadline_cloud_job_data"] = {
+            "jobTemplate": job_template,
+            "parameterValues": parameter_values,
+            "assetReferences": asset_refs_dict,
             "job_template": job_template,
             "parameter_values": parameter_values,
             "asset_references": asset_refs_dict,

@@ -121,9 +121,6 @@ class AddPublishingStep(pyblish.api.InstancePlugin):
         publishing_step = {
             "name": "publish to AYON",
             "description": "Publish rendering result to AYON",
-            "dependencies": [
-                {"dependsOn": name} for name in render_step_names
-            ],
             "hostRequirements": {
                 "attributes": [{"name": "attr.role", "anyOf": publish_role}]
             },
@@ -186,5 +183,14 @@ ayon --debug addon deadline_cloud publish \
                 },
             },
         }
+
+        # OpenJD's JobTemplate schema requires `dependencies` to have at least
+        # 1 item; only add the key when there is at least one render step to
+        # depend on (a single ROP with no upstream deps yields an empty list,
+        # which makes CreateJob reject the template).
+        if render_step_names:
+            publishing_step["dependencies"] = [
+                {"dependsOn": name} for name in render_step_names
+            ]
 
         steps.append(publishing_step)
