@@ -31,13 +31,6 @@ _SUBMITTER_API_IMPORTS: dict[str, str] = {
         "deadline.blender_submitter.addons.deadline_cloud_blender_submitter"
         ".submitter_api:BlenderSubmitterAPI"
     ),
-    "max": "deadline.max_submitter.submitter_api:MaxSubmitterAPI",
-    "cinema4d": (
-        "deadline.cinema4d_submitter.submitter_api:Cinema4DSubmitterAPI"
-    ),
-    "unreal": "deadline.unreal_submitter.submitter_api:UnrealSubmitterAPI",
-    "keyshot": "deadline.keyshot_submitter.submitter_api:KeyShotSubmitterAPI",
-    "vred": "deadline.vred_submitter.submitter_api:VREDSubmitterAPI",
 }
 
 # Hosts AYON currently supports for Deadline Cloud submission.
