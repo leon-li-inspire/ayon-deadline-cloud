@@ -2,19 +2,14 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, Type
+from typing import TYPE_CHECKING, Type
 
-from ayon_core.lib import (
-    AbstractAttrDef,
-    BoolDef,
-    NumberDef,
-    TextDef,
-)
 from ayon_maya.api import plugin
 from deadline.maya_submitter.scene import Scene
 from maya import cmds
 
 if TYPE_CHECKING:
+    from ayon_core.lib import AbstractAttrDef
     from ayon_core.pipeline import CreatedInstance
 
 
@@ -65,88 +60,27 @@ class CreateDeadlineCloudJob(plugin.MayaCreator):
         return instance
 
     def _load_job_data(self) -> list[Type[AbstractAttrDef]]:
-        """Load job template and parameters.
-
-        Note:
-            Maybe this could be moved to a collector.
+        """Load job template and parameters as instance attribute definitions.
 
         Returns:
             list[Type[AbstractAttrDef]]
 
         """
-        from deadline.maya_submitter.data_classes import (
-            RenderSubmitterUISettings,
-        )
-        from deadline.maya_submitter.maya_render_submitter import (
-            get_job_template_for_submission,
-            get_parameter_values_for_submission,
-            get_queue_parameters,
+        from ayon_deadline_cloud.api.create_job_common import (
+            load_job_attr_defs,
         )
 
-        settings = RenderSubmitterUISettings()
+        def _seed(api, settings):  # noqa: ANN001, ANN202, ARG001
+            # Populate project/output paths from the Maya scene + AYON workdir
+            # when the submitter left them empty.
+            work_dir = self._get_ayon_work_dir()
+            if work_dir:
+                if not settings.project_path:
+                    settings.project_path = Scene.project_path() or work_dir
+                if not settings.output_path:
+                    settings.output_path = Scene.output_path() or work_dir
 
-        # Populate project and output paths from scene settings
-        work_dir = self._get_ayon_work_dir()
-        if work_dir:
-            settings.project_path = Scene.project_path() or work_dir
-            settings.output_path = Scene.output_path() or work_dir
-
-        queue_parameters: list[dict[str, Any]] = get_queue_parameters()
-
-        # this would be 'job_bundle/template.yaml'
-        job_template = get_job_template_for_submission(settings)
-        # this would be 'job_bundle/parameter_values.yaml'
-        parameter_values = get_parameter_values_for_submission(
-            settings, queue_parameters)
-
-        parameter_values_dict = {
-            i["name"]: i["value"]
-            for i in parameter_values
-        }
-
-        out = []
-
-        for param_def in job_template["parameterDefinitions"]:
-
-            try:
-                value = parameter_values_dict[param_def["name"]]
-            except KeyError:
-                value = param_def.get("default")
-
-            try:
-                label: str = param_def["userInterface"]["label"]
-            except KeyError:
-                label = param_def["name"]
-
-            self.log.debug("%s(%s): %s",
-                           label, param_def["name"], value)
-            if param_def["type"] in {"STRING", "PATH"}:
-                if param_def["userInterface"]["control"] == "CHECK_BOX":
-                    out.append(
-                        BoolDef(
-                            label=label,
-                            key=param_def["name"],
-                            default=bool(value == "true"),
-                        )
-                    )
-                else:
-                    out.append(
-                        TextDef(
-                            label=label,
-                            key=param_def["name"],
-                            default=value,
-                            multiline=False,
-                        )
-                    )
-            elif param_def["type"] == "INT":
-                out.append(
-                    NumberDef(
-                        label=label,
-                        key=param_def["name"],
-                        default=value,
-                    )
-                )
-        return out
+        return load_job_attr_defs("maya", self.log, seed_settings=_seed)
 
     def get_instance_attr_defs(self) -> list[Type[AbstractAttrDef]]:
         """Get instance attribute definitions.

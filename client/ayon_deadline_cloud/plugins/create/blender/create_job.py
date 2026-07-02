@@ -3,17 +3,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Type
 
-from ayon_nuke.api import NukeCreator
+from ayon_blender.api import plugin
 
 if TYPE_CHECKING:
     from ayon_core.lib import AbstractAttrDef
 
 
-class CreateDeadlineCloudJob(NukeCreator):
-    """Creator plugin to create a backdrop node representing
-    Deadline Cloud Job instance.
-    """  # noqa: D205
-    identifier = "deadline_cloud_job"
+class CreateDeadlineCloudJob(plugin.BlenderCreator):
+    """Creator plugin for AWS Deadline Cloud Render Job."""
+    identifier = "io.ayon.create.deadline_cloud_job"
     label = "Deadline Cloud Render Job"
     product_base_type = "deadline_cloud"
     product_type = product_base_type
@@ -30,7 +28,7 @@ class CreateDeadlineCloudJob(NukeCreator):
             load_job_attr_defs,
         )
 
-        return load_job_attr_defs("nuke", self.log)
+        return load_job_attr_defs("blender", self.log)
 
     def get_instance_attr_defs(self) -> list[Type[AbstractAttrDef]]:
         """Get instance attribute definitions.

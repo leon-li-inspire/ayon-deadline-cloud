@@ -4,17 +4,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Type
 
 import hou
-from ayon_core.lib import (
-    AbstractAttrDef,
-    BoolDef,
-    NumberDef,
-    TextDef,
-)
-from ayon_deadline_cloud.api.submitter_bridge import HoudiniSetting
 from ayon_houdini.api import plugin
 
 if TYPE_CHECKING:
     import pyblish.api
+    from ayon_core.lib import AbstractAttrDef
     from ayon_core.pipeline import CreatedInstance
 
 
@@ -94,12 +88,14 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
             list[Type[AbstractAttrDef]]
 
         """
-        from deadline_cloud_for_houdini.submitter import (
-            get_job_template_for_submission,
-            get_parameter_values_for_submission,
-            get_queue_parameters,
+        from ayon_deadline_cloud.api.create_job_common import (
+            build_attr_defs_from_template,
         )
-        settings = HoudiniSetting()
+        from ayon_deadline_cloud.api.submitter_registry import (
+            get_submitter_api_for_host,
+        )
+        from deadline.client.submitter_api import get_queue_parameters
+
         instance_node_path = instance.get("instance_node")
         rop_node = hou.node(instance_node_path) if instance_node_path else None
         if rop_node is None:
@@ -110,78 +106,20 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
             )
             return []
 
-        settings.rop_node = rop_node
+        # Use the unified SubmitterAPI (same path as the publish bridge). The
+        # Houdini API resolves all data from its ROP node path, so seed it from
+        # the instance node before requesting settings.
+        api = get_submitter_api_for_host("houdini")
+        api._rop_node_path = instance_node_path  # noqa: SLF001
+        settings = api.get_settings()
+
         queue_parameters: list[dict[str, Any]] = get_queue_parameters()
+        job_template = api.get_job_template(settings)
+        parameter_values = api.get_parameter_values(settings, queue_parameters)
 
-        # this would be 'job_bundle/template.yaml'
-        job_template = get_job_template_for_submission(settings)
-        # this would be 'job_bundle/parameter_values.yaml'
-        parameter_values_payload = get_parameter_values_for_submission(
-            settings, queue_parameters)
-
-        if isinstance(parameter_values_payload, dict):
-            parameter_values = parameter_values_payload.get("parameterValues")
-        else:
-            parameter_values = parameter_values_payload
-
-        if not isinstance(parameter_values, list):
-            self.log.warning(
-                "Unexpected parameter values payload type: %s",
-                type(parameter_values_payload).__name__,
-            )
-            parameter_values = []
-
-        parameter_values_dict = {
-            item["name"]: item["value"]
-            for item in parameter_values
-            if isinstance(item, dict)
-            and "name" in item
-            and "value" in item
-        }
-
-        out = []
-
-        for param_def in job_template["parameterDefinitions"]:
-            try:
-                value = parameter_values_dict[param_def["name"]]
-            except KeyError:
-                value = param_def.get("default")
-
-            try:
-                label: str = param_def["userInterface"]["label"]
-            except KeyError:
-                label = param_def["name"]
-
-            self.log.debug("%s(%s): %s",
-                           label, param_def["name"], value)
-            if param_def["type"] in {"STRING", "PATH"}:
-                control = param_def.get("userInterface", {}).get("control", "")
-                if control == "CHECK_BOX":
-                    out.append(
-                        BoolDef(
-                            label=label,
-                            key=param_def["name"],
-                            default=bool(value == "true"),
-                        )
-                    )
-                else:
-                    out.append(
-                        TextDef(
-                            label=label,
-                            key=param_def["name"],
-                            default=value,
-                            multiline=False,
-                        )
-                    )
-            elif param_def["type"] == "INT":
-                out.append(
-                    NumberDef(
-                        label=label,
-                        key=param_def["name"],
-                        default=value,
-                    )
-                )
-        return out
+        return build_attr_defs_from_template(
+            job_template, parameter_values, self.log
+        )
 
     def get_pre_create_attr_defs(self) -> list[Type[AbstractAttrDef]]:  # noqa: PLR6301
         """Get attribute definitions for pre-create step.
