@@ -34,6 +34,11 @@ extend-exclude = [
     "mkdocs_hooks.py"
 ]
 
+# Honor the excludes above even when paths are passed explicitly on the command
+# line (the PR linting workflow feeds ruff the list of changed files via `src:`,
+# which would otherwise re-include excluded paths such as `tests/`).
+force-exclude = true
+
 # Same as Black.
 line-length = 79
 indent-width = 4
