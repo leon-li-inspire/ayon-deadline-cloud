@@ -109,13 +109,15 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
         # Use the unified BaseSubmitter (same path as the publish bridge). The
         # Houdini submitter resolves all data from its ROP node path, so seed
         # it from the instance node before requesting settings.
-        api = get_submitter_for_host("houdini")
-        api._rop_node_path = instance_node_path  # noqa: SLF001
-        settings = api.get_settings()
+        submitter = get_submitter_for_host("houdini")
+        submitter._rop_node_path = instance_node_path  # noqa: SLF001
+        settings = submitter.get_settings()
 
         queue_parameters: list[dict[str, Any]] = get_queue_parameters()
-        job_template = api.get_job_template(settings)
-        parameter_values = api.get_parameter_values(settings, queue_parameters)
+        job_template = submitter.get_job_template(settings)
+        parameter_values = submitter.get_parameter_values(
+            settings, queue_parameters
+        )
 
         return build_attr_defs_from_template(
             job_template, parameter_values, self.log

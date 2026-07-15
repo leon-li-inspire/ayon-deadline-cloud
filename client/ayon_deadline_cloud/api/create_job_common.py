@@ -122,8 +122,8 @@ def load_job_attr_defs(
     Args:
         host_name: The AYON host name (e.g. ``"nuke"``).
         logger: Optional logger for per-parameter debug output.
-        seed_settings: Optional callable ``(api, settings) -> None`` to mutate
-            the freshly-collected settings before building the template.
+        seed_settings: Optional callable ``(submitter, settings) -> None`` to
+            mutate the freshly-collected settings before building the template.
 
     Returns:
         A list of ``AbstractAttrDef`` for the host's create instance.
@@ -132,14 +132,16 @@ def load_job_attr_defs(
 
     from .submitter_registry import get_submitter_for_host
 
-    api = get_submitter_for_host(host_name)
-    settings = api.get_settings()
+    submitter = get_submitter_for_host(host_name)
+    settings = submitter.get_settings()
     if seed_settings is not None:
-        seed_settings(api, settings)
+        seed_settings(submitter, settings)
 
     queue_parameters: list[dict[str, Any]] = get_queue_parameters()
-    job_template = api.get_job_template(settings)
-    parameter_values = api.get_parameter_values(settings, queue_parameters)
+    job_template = submitter.get_job_template(settings)
+    parameter_values = submitter.get_parameter_values(
+        settings, queue_parameters
+    )
     return build_attr_defs_from_template(
         job_template, parameter_values, logger
     )

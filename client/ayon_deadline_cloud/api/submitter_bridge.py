@@ -55,26 +55,28 @@ def _unified_submitter_bridge(
     Returns:
         A SubmitterBridge delegating to the host's ``BaseSubmitter``.
     """
-    api = get_submitter_for_host(host_name)
+    submitter = get_submitter_for_host(host_name)
     # Host-specific node seeding: Houdini's submitter derives its settings
     # and job template from a ROP node path. The create plugin seeds this at
     # create time; the publish bridge must do the same, otherwise
     # get_settings()/get_job_template() raise "Cannot find ROP node at path: ".
-    if instance_node and hasattr(api, "_rop_node_path"):
-        api._rop_node_path = instance_node  # noqa: SLF001
-    settings = api.get_settings()
+    if instance_node and hasattr(submitter, "_rop_node_path"):
+        submitter._rop_node_path = instance_node  # noqa: SLF001
+    settings = submitter.get_settings()
 
     def _job_template(
         _settings: object,
         host_requirements: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
-        return api.get_job_template(_settings, host_requirements)
+        return submitter.get_job_template(_settings, host_requirements)
 
     def _parameter_values(
         _settings: object,
         queue_parameters: Optional[list[dict[str, Any]]] = None,
     ) -> list[dict[str, Any]]:
-        return api.get_parameter_values(_settings, queue_parameters or [])
+        return submitter.get_parameter_values(
+            _settings, queue_parameters or []
+        )
 
     def _queue_parameters(
         farm_id: Optional[str] = None,
@@ -90,7 +92,7 @@ def _unified_submitter_bridge(
     def _asset_references(
         _asset_references: Optional[AssetReferences] = None,
     ) -> dict[str, Any]:
-        return api.get_asset_references(settings)
+        return submitter.get_asset_references(settings)
 
     return SubmitterBridge(
         submitter_settings=settings,
