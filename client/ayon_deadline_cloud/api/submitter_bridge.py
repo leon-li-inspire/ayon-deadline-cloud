@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from deadline.client.submitter_api import get_queue_parameters
+from deadline.client.api import get_queue_parameters
 
 from .submitter_registry import get_submitter_api_for_host
 

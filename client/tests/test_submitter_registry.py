@@ -64,10 +64,80 @@ def test_get_submitter_api_imports_and_instantiates(monkeypatch):
     monkeypatch.setitem(
         submitter_registry._SUBMITTER_API_IMPORTS,
         "maya",
-        "stub_submitter_mod:_StubAPI",
+        ("stub_submitter_mod:_StubAPI",),
     )
     try:
         obj = submitter_registry.get_submitter_api_for_host("maya")
         assert isinstance(obj, _StubAPI)
     finally:
         sys.modules.pop("stub_submitter_mod", None)
+
+
+def test_import_map_values_are_tuples_of_specs():
+    # Each host maps to an ordered tuple of "module.path:ClassName" candidates.
+    for host, candidates in submitter_registry._SUBMITTER_API_IMPORTS.items():
+        assert isinstance(candidates, tuple), host
+        assert candidates, f"{host} has no candidate specs"
+        for spec in candidates:
+            assert spec.count(":") == 1, spec
+
+
+def test_blender_tries_addon_name_first():
+    # A real Blender install exposes the flat addon name; the deep source-tree
+    # path is only a fallback. Order matters, so assert it.
+    blender = submitter_registry._SUBMITTER_API_IMPORTS["blender"]
+    assert blender[0].startswith("deadline_cloud_blender_submitter."), blender
+    assert any(
+        spec.startswith("deadline.blender_submitter.addons.") for spec in blender
+    ), blender
+
+
+def test_blender_prefers_new_submitter_over_legacy_api():
+    # Blender renamed submitter_api:BlenderSubmitterAPI -> submitter:
+    # BlenderSubmitter. The new module/class must be tried before the legacy
+    # names so a rename-aware install binds to the new one.
+    blender = submitter_registry._SUBMITTER_API_IMPORTS["blender"]
+    first_new = next(
+        i for i, spec in enumerate(blender) if spec.endswith(":BlenderSubmitter")
+    )
+    first_legacy = next(
+        i for i, spec in enumerate(blender) if spec.endswith(":BlenderSubmitterAPI")
+    )
+    assert first_new < first_legacy, blender
+
+
+def test_get_submitter_api_falls_back_to_second_candidate(monkeypatch):
+    # First candidate unimportable, second resolves -> second wins.
+    stub_mod = types.ModuleType("stub_fallback_mod")
+
+    class _StubAPI:
+        pass
+
+    stub_mod._StubAPI = _StubAPI
+    sys.modules["stub_fallback_mod"] = stub_mod
+    monkeypatch.setitem(
+        submitter_registry._SUBMITTER_API_IMPORTS,
+        "blender",
+        (
+            "nonexistent_first_choice.submitter_api:Nope",
+            "stub_fallback_mod:_StubAPI",
+        ),
+    )
+    try:
+        obj = submitter_registry.get_submitter_api_for_host("blender")
+        assert isinstance(obj, _StubAPI)
+    finally:
+        sys.modules.pop("stub_fallback_mod", None)
+
+
+def test_get_submitter_api_raises_when_no_candidate_resolves(monkeypatch):
+    monkeypatch.setitem(
+        submitter_registry._SUBMITTER_API_IMPORTS,
+        "blender",
+        (
+            "nope_one.submitter_api:A",
+            "nope_two.submitter_api:B",
+        ),
+    )
+    with pytest.raises(ModuleNotFoundError, match="Could not import the SubmitterAPI"):
+        submitter_registry.get_submitter_api_for_host("blender")

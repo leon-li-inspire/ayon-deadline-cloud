@@ -1,7 +1,54 @@
 """Tools for handling conda/rez packages."""
 from __future__ import annotations
 
+import importlib
 from typing import Any
+
+# Candidate module paths for the Blender submitter's ``_version`` module.
+# Blender ships as an addon importable under
+# ``deadline_cloud_blender_submitter`` when installed the normal way; the deep
+# ``deadline.blender_submitter.addons.…`` path only resolves in the source /
+# wheel layout. Try both. Keep in sync with
+# submitter_registry._SUBMITTER_API_IMPORTS["blender"].
+_BLENDER_VERSION_ADDON = "deadline_cloud_blender_submitter._version"
+_BLENDER_VERSION_SOURCE = (
+    "deadline.blender_submitter.addons"
+    ".deadline_cloud_blender_submitter._version"
+)
+_BLENDER_VERSION_MODULES: tuple[str, ...] = (
+    _BLENDER_VERSION_ADDON,
+    _BLENDER_VERSION_SOURCE,
+)
+
+
+def _import_blender_adaptor_version_tuple() -> tuple[int, ...]:
+    """Import the Blender submitter ``version_tuple``.
+
+    Tries each candidate layout in ``_BLENDER_VERSION_MODULES`` in order and
+    returns the first that resolves.
+
+    Returns:
+        The adaptor ``version_tuple``.
+
+    Raises:
+        ModuleNotFoundError: If no candidate module resolves.
+
+    """
+    last_error: ModuleNotFoundError | None = None
+    for module_path in _BLENDER_VERSION_MODULES:
+        try:
+            module = importlib.import_module(module_path)
+        except ModuleNotFoundError as exc:
+            last_error = exc
+            continue
+        return module.version_tuple
+
+    tried = ", ".join(_BLENDER_VERSION_MODULES)
+    msg = (
+        "Could not import the Blender submitter _version module. "
+        f"Tried: {tried}"
+    )
+    raise ModuleNotFoundError(msg) from last_error
 
 
 def _extract_renderers(job_template: dict[str, Any]) -> set[str]:
@@ -133,9 +180,7 @@ class HostCondaPackages:
             A list of conda packages for Blender
 
         """
-        from deadline.blender_submitter.addons.deadline_cloud_blender_submitter._version import (  # noqa: E501, PLC2701
-            version_tuple as adaptor_version_tuple,
-        )
+        adaptor_version_tuple = _import_blender_adaptor_version_tuple()
 
         packages: list[str] = []
         try:

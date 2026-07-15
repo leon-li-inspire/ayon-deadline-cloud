@@ -94,7 +94,7 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
         from ayon_deadline_cloud.api.submitter_registry import (
             get_submitter_api_for_host,
         )
-        from deadline.client.submitter_api import get_queue_parameters
+        from deadline.client.api import get_queue_parameters
 
         instance_node_path = instance.get("instance_node")
         rop_node = hou.node(instance_node_path) if instance_node_path else None

@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     import logging
 
     from ayon_core.lib import AbstractAttrDef
-    from deadline.client.submitter_api import SubmitterAPI, SubmitterSettings
+    from deadline.client.api import BaseSubmitter, BaseSubmitterSettings
 
 
 def build_attr_defs_from_template(
@@ -109,7 +109,7 @@ def load_job_attr_defs(
     host_name: str,
     logger: logging.Logger | None = None,
     seed_settings: Optional[
-        Callable[[SubmitterAPI, SubmitterSettings], None]
+        Callable[[BaseSubmitter, BaseSubmitterSettings], None]
     ] = None,
 ) -> list[AbstractAttrDef]:
     """Resolve a host's SubmitterAPI and build its instance AttrDefs.
@@ -128,7 +128,7 @@ def load_job_attr_defs(
     Returns:
         A list of ``AbstractAttrDef`` for the host's create instance.
     """
-    from deadline.client.submitter_api import get_queue_parameters
+    from deadline.client.api import get_queue_parameters
 
     from .submitter_registry import get_submitter_api_for_host
 
