@@ -65,7 +65,14 @@ _SUBMITTER_API_IMPORTS: dict[str, tuple[str, ...]] = {
         "deadline_cloud_for_houdini.submitter_api:HoudiniSubmitter",
         "deadline_cloud_for_houdini.submitter_api:HoudiniSubmitterAPI",
     ),
-    "nuke": ("deadline.nuke_submitter.submitter_api:NukeSubmitterAPI",),
+    # deadline-cloud-for-nuke renamed submitter_api -> submitter and
+    # NukeSubmitterAPI -> NukeSubmitter (aligning with the BaseSubmitter
+    # rename); the old submitter_api module was removed. Prefer the new
+    # module/class; keep the legacy spec as a fallback for older installs.
+    "nuke": (
+        "deadline.nuke_submitter.submitter:NukeSubmitter",
+        "deadline.nuke_submitter.submitter_api:NukeSubmitterAPI",
+    ),
     "blender": (
         # New name — addon install (real Blender): addon dir is on sys.path.
         _BLENDER_ADDON_API,

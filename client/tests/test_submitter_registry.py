@@ -106,6 +106,20 @@ def test_blender_prefers_new_submitter_over_legacy_api():
     assert first_new < first_legacy, blender
 
 
+def test_nuke_prefers_new_submitter_over_legacy_api():
+    # Nuke renamed submitter_api:NukeSubmitterAPI -> submitter:NukeSubmitter
+    # and removed the old module. The new module/class must be tried before the
+    # legacy name so a rename-aware install binds to the new one.
+    nuke = submitter_registry._SUBMITTER_API_IMPORTS["nuke"]
+    first_new = next(
+        i for i, spec in enumerate(nuke) if spec.endswith(":NukeSubmitter")
+    )
+    first_legacy = next(
+        i for i, spec in enumerate(nuke) if spec.endswith(":NukeSubmitterAPI")
+    )
+    assert first_new < first_legacy, nuke
+
+
 def test_get_submitter_api_falls_back_to_second_candidate(monkeypatch):
     # First candidate unimportable, second resolves -> second wins.
     stub_mod = types.ModuleType("stub_fallback_mod")
