@@ -92,7 +92,7 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
             build_attr_defs_from_template,
         )
         from ayon_deadline_cloud.api.submitter_registry import (
-            get_submitter_api_for_host,
+            get_submitter_for_host,
         )
         from deadline.client.api import get_queue_parameters
 
@@ -106,10 +106,10 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
             )
             return []
 
-        # Use the unified SubmitterAPI (same path as the publish bridge). The
-        # Houdini API resolves all data from its ROP node path, so seed it from
-        # the instance node before requesting settings.
-        api = get_submitter_api_for_host("houdini")
+        # Use the unified BaseSubmitter (same path as the publish bridge). The
+        # Houdini submitter resolves all data from its ROP node path, so seed
+        # it from the instance node before requesting settings.
+        api = get_submitter_for_host("houdini")
         api._rop_node_path = instance_node_path  # noqa: SLF001
         settings = api.get_settings()
 

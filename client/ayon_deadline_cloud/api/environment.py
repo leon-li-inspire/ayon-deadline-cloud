@@ -9,7 +9,7 @@ from typing import Any
 # ``deadline_cloud_blender_submitter`` when installed the normal way; the deep
 # ``deadline.blender_submitter.addons.…`` path only resolves in the source /
 # wheel layout. Try both. Keep in sync with
-# submitter_registry._SUBMITTER_API_IMPORTS["blender"].
+# submitter_registry._SUBMITTER_IMPORTS["blender"].
 _BLENDER_VERSION_ADDON = "deadline_cloud_blender_submitter._version"
 _BLENDER_VERSION_SOURCE = (
     "deadline.blender_submitter.addons"

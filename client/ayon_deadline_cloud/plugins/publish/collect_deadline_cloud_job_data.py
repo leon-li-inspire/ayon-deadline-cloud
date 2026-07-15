@@ -33,8 +33,9 @@ class CollectDeadlineCloudJobData(
     families: ClassVar[list[str]] = ["deadline_cloud"]
     settings_category = "deadline_cloud"
 
-    # Host-agnostic: any DCC that registers a SubmitterAPI is supported via the
-    # unified bridge (see api.submitter_registry.SUPPORTED_HOSTS).
+    # Host-agnostic: any DCC that provides a BaseSubmitter subclass is
+    # supported via the unified bridge
+    # (see api.submitter_registry.SUPPORTED_HOSTS).
     hosts: ClassVar[list[str]] = SUPPORTED_HOSTS
     log: Logger
 

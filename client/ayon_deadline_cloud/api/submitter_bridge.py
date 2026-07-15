@@ -1,8 +1,8 @@
 """Submitter bridge across all DCC hosts.
 
-This bridges AYON's publishing plugins to the unified ``SubmitterAPI`` defined
+This bridges AYON's publishing plugins to the unified ``BaseSubmitter`` defined
 in ``deadline-cloud``. A single :class:`SubmitterBridge` works for every DCC
-that registers a ``SubmitterAPI`` (see
+that provides a ``BaseSubmitter`` subclass (see
 :mod:`ayon_deadline_cloud.api.submitter_registry`), so no per-host bridge code
 is required.
 """
@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from deadline.client.api import get_queue_parameters
 
-from .submitter_registry import get_submitter_api_for_host
+from .submitter_registry import get_submitter_for_host
 
 if TYPE_CHECKING:
     from deadline.client.job_bundle.submission import AssetReferences
@@ -35,11 +35,12 @@ def _unified_submitter_bridge(
     host_name: str,
     instance_node: Optional[str] = None,
 ) -> SubmitterBridge:
-    """Build a SubmitterBridge backed by the unified SubmitterAPI.
+    """Build a SubmitterBridge backed by the unified ``BaseSubmitter``.
 
-    Works for any DCC with a SubmitterAPI. The concrete class is imported
-    directly (no registry / no dispatch through deadline-cloud). The returned
-    bridge keeps the same call shape the publishing plugins already expect.
+    Works for any DCC with a ``BaseSubmitter`` subclass. The concrete class is
+    imported directly (no registry / no dispatch through deadline-cloud). The
+    returned bridge keeps the same call shape the publishing plugins already
+    expect.
 
     Args:
         host_name: The name of the host application (e.g. "maya").
@@ -48,14 +49,14 @@ def _unified_submitter_bridge(
             ignore this, but some (e.g. Houdini) resolve their settings and job
             template from a specific node (its ROP), so the publish side must
             seed it before ``get_settings()`` — the same way the create plugin
-            does. When the API exposes a ``_rop_node_path`` slot and a node is
-            provided, it is seeded here.
+            does. When the submitter exposes a ``_rop_node_path`` slot and a
+            node is provided, it is seeded here.
 
     Returns:
-        A SubmitterBridge delegating to the host's SubmitterAPI.
+        A SubmitterBridge delegating to the host's ``BaseSubmitter``.
     """
-    api = get_submitter_api_for_host(host_name)
-    # Host-specific node seeding: Houdini's SubmitterAPI derives its settings
+    api = get_submitter_for_host(host_name)
+    # Host-specific node seeding: Houdini's submitter derives its settings
     # and job template from a ROP node path. The create plugin seeds this at
     # create time; the publish bridge must do the same, otherwise
     # get_settings()/get_job_template() raise "Cannot find ROP node at path: ".
@@ -106,13 +107,14 @@ def get_submitter_bridge(
 ) -> SubmitterBridge:
     """Get the submitter bridge for the given host.
 
-    Backed by the unified SubmitterAPI, which supports every DCC that
-    registers one (see :mod:`ayon_deadline_cloud.api.submitter_registry`).
+    Backed by the unified ``BaseSubmitter``, which supports every DCC that
+    provides a subclass (see
+    :mod:`ayon_deadline_cloud.api.submitter_registry`).
 
     Args:
         host_name (str): The name of the host application.
         instance_node (Optional[str]): Optional host node path identifying the
-            instance being submitted. Forwarded to the SubmitterAPI for hosts
+            instance being submitted. Forwarded to the submitter for hosts
             (e.g. Houdini) that resolve their data from a specific node.
 
     Returns:

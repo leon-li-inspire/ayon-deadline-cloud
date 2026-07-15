@@ -1,9 +1,10 @@
-"""Consumer-side resolution of DCC SubmitterAPI implementations.
+"""Consumer-side resolution of DCC ``BaseSubmitter`` implementations.
 
 `deadline-cloud` deliberately ships no discovery registry or factory. A
 consumer always runs inside a known DCC, so this module owns the AYON-side
 knowledge of which DCCs are supported and how to import their concrete
-`SubmitterAPI` — and resolves one by importing it directly, on demand.
+``BaseSubmitter`` subclass — and resolves one by importing it directly, on
+demand.
 
 The import is deferred to call time so that a host entry does not require its
 DCC modules to be importable until that host is actually used.
@@ -19,9 +20,9 @@ if TYPE_CHECKING:
 
 
 # Maps each supported DCC host to one or more ``module.path:ClassName``
-# candidate import specs for its concrete SubmitterAPI, tried in order. Kept
-# here (in the consumer) rather than in deadline-cloud so the shared library
-# has no dependency on the DCC submitter packages.
+# candidate import specs for its concrete ``BaseSubmitter`` subclass, tried in
+# order. Kept here (in the consumer) rather than in deadline-cloud so the
+# shared library has no dependency on the DCC submitter packages.
 #
 # Most DCCs expose a single stable import name. Blender is the exception: it
 # ships as a Blender *addon* whose modules are importable under
@@ -48,7 +49,7 @@ _BLENDER_SOURCE_API_LEGACY = (
     "deadline.blender_submitter.addons.deadline_cloud_blender_submitter"
     ".submitter_api:BlenderSubmitterAPI"
 )
-_SUBMITTER_API_IMPORTS: dict[str, tuple[str, ...]] = {
+_SUBMITTER_IMPORTS: dict[str, tuple[str, ...]] = {
     # deadline-cloud-for-maya renamed submitter_api -> submitter and
     # MayaSubmitterAPI -> MayaSubmitter. Prefer the new name; fall back to the
     # old one so an older maya submitter install still resolves.
@@ -85,11 +86,11 @@ _SUBMITTER_API_IMPORTS: dict[str, tuple[str, ...]] = {
 }
 
 # Hosts AYON currently supports for Deadline Cloud submission.
-SUPPORTED_HOSTS: list[str] = list(_SUBMITTER_API_IMPORTS)
+SUPPORTED_HOSTS: list[str] = list(_SUBMITTER_IMPORTS)
 
 
-def get_submitter_api_for_host(host_name: str) -> BaseSubmitter:
-    """Import and instantiate the SubmitterAPI for a DCC host.
+def get_submitter_for_host(host_name: str) -> BaseSubmitter:
+    """Import and instantiate the ``BaseSubmitter`` subclass for a DCC host.
 
     The class is imported directly from its DCC package (no registry / no
     dispatch through deadline-cloud). When a host declares multiple candidate
@@ -99,16 +100,16 @@ def get_submitter_api_for_host(host_name: str) -> BaseSubmitter:
         host_name: DCC identifier string (e.g. "maya", "nuke").
 
     Returns:
-        A new SubmitterAPI instance for the host.
+        A new ``BaseSubmitter`` subclass instance for the host.
 
     Raises:
-        ValueError: If the host has no SubmitterAPI mapping.
+        ValueError: If the host has no submitter mapping.
         ModuleNotFoundError: If none of the host's candidate specs resolve.
     """
-    candidates = _SUBMITTER_API_IMPORTS.get(host_name)
+    candidates = _SUBMITTER_IMPORTS.get(host_name)
     if candidates is None:
         msg = (
-            f"No SubmitterAPI mapping for host '{host_name}'. "
+            f"No submitter mapping for host '{host_name}'. "
             f"Supported: {SUPPORTED_HOSTS}"
         )
         raise ValueError(msg)
@@ -125,7 +126,7 @@ def get_submitter_api_for_host(host_name: str) -> BaseSubmitter:
 
     tried = ", ".join(spec.split(":", 1)[0] for spec in candidates)
     msg = (
-        f"Could not import the SubmitterAPI for host '{host_name}'. "
+        f"Could not import the submitter for host '{host_name}'. "
         f"Tried: {tried}"
     )
     raise ModuleNotFoundError(msg) from last_error

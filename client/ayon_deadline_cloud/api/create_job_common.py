@@ -1,13 +1,13 @@
 """Shared helpers for the per-host "Deadline Cloud Render Job" create plugins.
 
 Every host's ``create/<host>/create_job.py`` builds the same instance attribute
-definitions: it resolves the host's unified :class:`SubmitterAPI`, collects the
-job template + parameter values, and converts the template's
+definitions: it resolves the host's unified :class:`BaseSubmitter`, collects
+the job template + parameter values, and converts the template's
 ``parameterDefinitions`` into AYON ``AbstractAttrDef`` objects. That conversion
 was copy-pasted into each plugin; it lives here once instead.
 
 Host plugins keep only their host-specific pieces (base ``Creator`` subclass,
-identifier, any ``create()`` overrides, and how they seed the SubmitterAPI).
+identifier, any ``create()`` overrides, and how they seed the submitter).
 """
 
 from __future__ import annotations
@@ -112,11 +112,11 @@ def load_job_attr_defs(
         Callable[[BaseSubmitter, BaseSubmitterSettings], None]
     ] = None,
 ) -> list[AbstractAttrDef]:
-    """Resolve a host's SubmitterAPI and build its instance AttrDefs.
+    """Resolve a host's ``BaseSubmitter`` and build its instance AttrDefs.
 
-    This is the common path used by hosts whose SubmitterAPI reads the live
-    scene directly (blender, nuke, cinema4d, vred). Hosts that need to seed the
-    API first (e.g. Houdini's ROP node path, Maya's work-dir defaults) can call
+    This is the common path used by hosts whose ``BaseSubmitter`` reads the
+    live scene directly (blender, nuke). Hosts that need to seed the submitter
+    first (e.g. Houdini's ROP node path, Maya's work-dir defaults) can call
     :func:`build_attr_defs_from_template` directly with their own settings.
 
     Args:
@@ -130,9 +130,9 @@ def load_job_attr_defs(
     """
     from deadline.client.api import get_queue_parameters
 
-    from .submitter_registry import get_submitter_api_for_host
+    from .submitter_registry import get_submitter_for_host
 
-    api = get_submitter_api_for_host(host_name)
+    api = get_submitter_for_host(host_name)
     settings = api.get_settings()
     if seed_settings is not None:
         seed_settings(api, settings)
