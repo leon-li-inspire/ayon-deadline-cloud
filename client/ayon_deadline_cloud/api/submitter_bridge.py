@@ -92,7 +92,10 @@ def _unified_submitter_bridge(
     def _asset_references(
         _asset_references: Optional[AssetReferences] = None,
     ) -> dict[str, Any]:
-        return submitter.get_asset_references(settings)
+        # get_asset_references now returns a typed AssetReferences (unified
+        # BaseSubmitter contract, deadline-cloud #1245); serialize to the dict
+        # shape the publish plugins write to asset_references.yaml.
+        return submitter.get_asset_references(settings).to_dict()
 
     return SubmitterBridge(
         submitter_settings=settings,
