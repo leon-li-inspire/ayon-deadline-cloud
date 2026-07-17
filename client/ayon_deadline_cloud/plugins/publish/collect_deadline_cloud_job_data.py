@@ -28,7 +28,7 @@ class CollectDeadlineCloudJobData(
     """Collect job data from AWS Deadline Cloud Submitter UI."""
 
     label = "Collect AWS Deadline Cloud Job Data"
-    order = pyblish.api.CollectorOrder + 0.1
+    order = pyblish.api.CollectorOrder + 0.4999
     targets: ClassVar[list[str]] = ["local"]
     families: ClassVar[list[str]] = ["deadline_cloud"]
     settings_category = "deadline_cloud"
