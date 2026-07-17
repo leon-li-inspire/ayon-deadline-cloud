@@ -49,7 +49,7 @@ def _unified_submitter_bridge(
             ignore this, but some (e.g. Houdini) resolve their settings and job
             template from a specific node (its ROP), so the publish side must
             seed it before ``get_settings()`` — the same way the create plugin
-            does. When the submitter exposes a ``_rop_node_path`` slot and a
+            does. When the submitter exposes ``set_rop_node_path()`` and a
             node is provided, it is seeded here.
 
     Returns:
@@ -60,8 +60,10 @@ def _unified_submitter_bridge(
     # and job template from a ROP node path. The create plugin seeds this at
     # create time; the publish bridge must do the same, otherwise
     # get_settings()/get_job_template() raise "Cannot find ROP node at path: ".
-    if instance_node and hasattr(submitter, "_rop_node_path"):
-        submitter._rop_node_path = instance_node  # noqa: SLF001
+    # Only Houdini exposes set_rop_node_path(); the check keeps the bridge
+    # host-agnostic (Maya/Nuke/Blender resolve everything from the live scene).
+    if instance_node and hasattr(submitter, "set_rop_node_path"):
+        submitter.set_rop_node_path(instance_node)
     settings = submitter.get_settings()
 
     def _job_template(

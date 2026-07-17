@@ -57,10 +57,10 @@ _SUBMITTER_IMPORTS: dict[str, tuple[str, ...]] = {
         "deadline.maya_submitter.submitter:MayaSubmitter",
         "deadline.maya_submitter.submitter_api:MayaSubmitterAPI",
     ),
-    # deadline-cloud-for-houdini renamed submitter_api -> submitter (the engine)
-    # and its old submitter.py -> gui_submitter.py (the native GUI callbacks),
-    # and HoudiniSubmitterAPI -> HoudiniSubmitter (aligning with the
-    # BaseSubmitter rename). Prefer the new module/class; keep the legacy
+    # deadline-cloud-for-houdini renamed submitter_api -> submitter (the
+    # engine) and its old submitter.py -> gui_submitter.py (the native GUI
+    # callbacks), and HoudiniSubmitterAPI -> HoudiniSubmitter (aligning with
+    # the BaseSubmitter rename). Prefer the new module/class; keep the legacy
     # module/class specs as fallbacks so an older install still resolves.
     "houdini": (
         "deadline_cloud_for_houdini.submitter:HoudiniSubmitter",

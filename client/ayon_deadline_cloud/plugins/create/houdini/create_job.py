@@ -110,7 +110,7 @@ class CreateDeadlineCloudJob(plugin.HoudiniCreator):
         # Houdini submitter resolves all data from its ROP node path, so seed
         # it from the instance node before requesting settings.
         submitter = get_submitter_for_host("houdini")
-        submitter._rop_node_path = instance_node_path  # noqa: SLF001
+        submitter.set_rop_node_path(instance_node_path)
         settings = submitter.get_settings()
 
         queue_parameters: list[dict[str, Any]] = get_queue_parameters()
