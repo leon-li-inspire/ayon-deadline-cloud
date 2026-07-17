@@ -67,7 +67,7 @@ def _extract_renderers(job_template: dict[str, Any]) -> set[str]:
             for ef in env.get("script", {}).get("embeddedFiles", []):
                 data_str = ef.get("data", "")
                 for line in data_str.splitlines():
-                    line = line.strip()  # noqa: PLW2901
+                    line = line.strip()  # ruff:ignore[redefined-loop-name]
                     if not line.startswith("renderer:"):
                         continue
                     renderer = line.split(":", 1)[1].strip()
@@ -97,7 +97,7 @@ class HostCondaPackages:
             A list of conda packages for Maya
 
         """
-        from deadline.maya_submitter._version import (  # noqa: PLC2701
+        from deadline.maya_submitter._version import (  # ruff:ignore[import-private-name]
             version_tuple as adaptor_version_tuple,
         )
 
@@ -106,7 +106,7 @@ class HostCondaPackages:
             import maya.cmds  # ty:ignore[unresolved-import]
 
             maya_version = maya.cmds.about(version=True)
-        except Exception:  # noqa: BLE001
+        except Exception:  # ruff:ignore[blind-except]
             maya_version = None
 
         # note: this is used to get the version of the adaptor, which is
@@ -136,14 +136,14 @@ class HostCondaPackages:
 
         return packages
 
-    def _get_conda_pkgs_for_houdini(self) -> list[str]:  # noqa: PLR6301
+    def _get_conda_pkgs_for_houdini(self) -> list[str]:  # ruff:ignore[no-self-use]
         """Get a list of conda packages for Houdini.
 
         Returns:
             A list of conda packages for Houdini
 
         """
-        from deadline_cloud_for_houdini._version import (  # noqa: PLC2701
+        from deadline_cloud_for_houdini._version import (  # ruff:ignore[import-private-name]
             version_tuple as adaptor_version_tuple,
         )
 
@@ -152,7 +152,7 @@ class HostCondaPackages:
             import hou  # ty:ignore[unresolved-import]
 
             houdini_version = hou.applicationVersionString().rsplit(".", 1)[0]
-        except Exception:  # noqa: BLE001
+        except Exception:  # ruff:ignore[blind-except]
             houdini_version = None
 
         # note: this is used to get the version of the adaptor, which is
@@ -173,7 +173,7 @@ class HostCondaPackages:
 
         return packages
 
-    def _get_conda_pkgs_for_blender(self) -> list[str]:  # noqa: PLR6301
+    def _get_conda_pkgs_for_blender(self) -> list[str]:  # ruff:ignore[no-self-use]
         """Get a list of conda packages for Blender.
 
         Returns:
@@ -188,7 +188,7 @@ class HostCondaPackages:
 
             # https://docs.blender.org/api/current/bpy.app.html#bpy.app.version
             blender_version = ".".join(str(v) for v in bpy.app.version[:2])
-        except Exception:  # noqa: BLE001
+        except Exception:  # ruff:ignore[blind-except]
             blender_version = None
 
         # note: this is used to get the version of the adaptor, which is
@@ -209,14 +209,14 @@ class HostCondaPackages:
 
         return packages
 
-    def _get_conda_pkgs_for_nuke(self) -> list[str]:  # noqa: PLR6301
+    def _get_conda_pkgs_for_nuke(self) -> list[str]:  # ruff:ignore[no-self-use]
         """Get a list of conda packages for Nuke.
 
         Returns:
             A list of conda packages for Nuke
 
         """
-        from deadline.nuke_submitter._version import (  # noqa: PLC2701
+        from deadline.nuke_submitter._version import (  # ruff:ignore[import-private-name]
             version_tuple as adaptor_version_tuple,
         )
 
@@ -225,7 +225,7 @@ class HostCondaPackages:
             import nuke  # ty:ignore[unresolved-import]
 
             nuke_version = nuke.NUKE_VERSION_MAJOR
-        except Exception:  # noqa: BLE001
+        except Exception:  # ruff:ignore[blind-except]
             nuke_version = None
 
         # note: this is used to get the version of the adaptor, which is

@@ -73,8 +73,8 @@ class CollectDeadlineCloudJobData(
     @classmethod
     def get_attr_defs_for_instance(
         cls,
-        create_context: CreateContext,  # noqa: ARG003
-        instance: CreatedInstance,  # noqa: ARG003
+        create_context: CreateContext,  # ruff:ignore[unused-class-method-argument]
+        instance: CreatedInstance,  # ruff:ignore[unused-class-method-argument]
     ) -> list[TextDef]:
         """Provide attributes to the publisher UI.
 
@@ -93,7 +93,7 @@ class CollectDeadlineCloudJobData(
             )
         ]
 
-    def process(self, instance: pyblish.api.Instance) -> None:  # noqa: C901, PLR0914, PLR0915
+    def process(self, instance: pyblish.api.Instance) -> None:  # ruff:ignore[complex-structure, too-many-locals, too-many-statements]
         """Collect job data from Deadline Submitter UI.
 
         Args:
@@ -311,7 +311,7 @@ class CollectDeadlineCloudJobData(
 
     @staticmethod
     def _build_job_template(
-        settings: Any,  # noqa: ANN401
+        settings: Any,  # ruff:ignore[any-type]
         instance: pyblish.api.Instance,
     ) -> dict[str, Any]:
         """Build and return the job template, ensuring it has a name.
@@ -447,7 +447,7 @@ class CollectDeadlineCloudJobData(
 
     def _build_submitter_settings(
         self,
-        settings: Any,  # noqa: ANN401
+        settings: Any,  # ruff:ignore[any-type]
         dc_settings: dict[str, Any],
         queue_parameters: list[dict[str, Any]],
     ) -> dict[str, Any]:

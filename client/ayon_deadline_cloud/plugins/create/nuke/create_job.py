@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 class CreateDeadlineCloudJob(NukeCreator):
     """Creator plugin to create a backdrop node representing
     Deadline Cloud Job instance.
-    """  # noqa: D205
+    """  # ruff:ignore[missing-blank-line-after-summary]
     identifier = "deadline_cloud_job"
     label = "Deadline Cloud Render Job"
     product_base_type = "deadline_cloud"
@@ -41,7 +41,7 @@ class CreateDeadlineCloudJob(NukeCreator):
         """
         return self._load_job_data()
 
-    def get_pre_create_attr_defs(self) -> list[Type[AbstractAttrDef]]:  # noqa: PLR6301
+    def get_pre_create_attr_defs(self) -> list[Type[AbstractAttrDef]]:  # ruff:ignore[no-self-use]
         """Get attribute definitions for pre-create step.
 
         Returns:

@@ -70,7 +70,7 @@ class CreateDeadlineCloudJob(plugin.MayaCreator):
             load_job_attr_defs,
         )
 
-        def _seed(api, settings):  # noqa: ANN001, ANN202, ARG001
+        def _seed(api, settings):  # ruff:ignore[missing-type-function-argument, missing-return-type-private-function, unused-function-argument]
             # Populate project/output paths from the Maya scene + AYON workdir
             # when the submitter left them empty.
             work_dir = self._get_ayon_work_dir()
