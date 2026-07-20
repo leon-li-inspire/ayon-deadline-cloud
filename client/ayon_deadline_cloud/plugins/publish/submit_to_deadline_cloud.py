@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import ayon_deadline_cloud.version
 import pyblish.api
 from deadline.client.api import create_job_from_job_bundle
-from deadline.client.job_bundle._yaml import (  # noqa: PLC2701
+from deadline.client.job_bundle._yaml import (  # ruff:ignore[import-private-name]
     deadline_yaml_dump,
 )
 from deadline.client.job_bundle.submission import AssetReferences
@@ -74,20 +74,27 @@ class SubmitToDeadlineCloud(pyblish.api.InstancePlugin):
                     indent=1
                 )
             self.log.info("Submitting job bundle to AWS Deadline Cloud...")
+            # All hosts (Houdini included) receive the computed known asset
+            # paths and an auto-confirm callback. Houdini used to be excluded
+            # here (commit 9acdcbc) as a workaround for its asset references
+            # being under-populated; now that they come from the submitter's
+            # authoritative ROP walk via the bridge, the hip file's directory
+            # is a known path and the exclusion is obsolete. Without this,
+            # Houdini submissions raise DeadlineOperationCanceled at the Job
+            # Attachments known-path gate.
             kwargs: dict[str, Any] = {
                 "job_bundle_dir": temp_dir,
                 "job_attachments_file_system": "COPIED",
                 "submitter_name": "AYON Deadline Cloud Addon",
                 "submitter_version": ayon_deadline_cloud.version.__version__,
                 "print_function_callback": self.log.debug,
+                "known_asset_paths": known_paths,
+                "interactive_confirmation_callback": (
+                    lambda _msg, _default: True
+                ),
                 # to take the snapshot without submitting:
                 # "debug_snapshot_dir": "C:\\debug\\AWS_DC_snapshots"
             }
-            if instance.context.data["hostName"] != "houdini":
-                kwargs["known_asset_paths"] = known_paths
-                kwargs["interactive_confirmation_callback"] = (
-                    lambda _msg, _default: True
-                )
 
             job_id = create_job_from_job_bundle(**kwargs)
             self.log.info(
