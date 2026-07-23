@@ -14,7 +14,6 @@ from ayon_deadline_cloud.api import auto_detect_conda_packages
 from ayon_deadline_cloud.api.submitter_bridge import get_submitter_bridge
 from ayon_deadline_cloud.api.submitter_registry import SUPPORTED_HOSTS
 from deadline import client
-from deadline.client.job_bundle.submission import AssetReferences
 
 if TYPE_CHECKING:
     from logging import Logger
@@ -93,7 +92,7 @@ class CollectDeadlineCloudJobData(
             )
         ]
 
-    def process(self, instance: pyblish.api.Instance) -> None:  # ruff:ignore[complex-structure, too-many-locals, too-many-statements]
+    def process(self, instance: pyblish.api.Instance) -> None:  # ruff:ignore[complex-structure, too-many-statements]
         """Collect job data from Deadline Submitter UI.
 
         Args:
@@ -246,14 +245,9 @@ class CollectDeadlineCloudJobData(
         if extra_conda_packages and "CondaPackages" in pv_by_name:
             pv_by_name["CondaPackages"]["value"] += f" {extra_conda_packages}"
 
-        asset_references = AssetReferences(
-            input_filenames=set(settings.input_filenames),
-            input_directories=set(settings.input_directories),
-            output_directories=set(settings.output_directories),
-        )
-        asset_refs_dict = submitter_bg.get_asset_references_for_submission(
-            asset_references
-        )
+        # The submitter walks the live scene for its own asset references
+        # (see submitter_bridge); we no longer build one from settings here.
+        asset_refs_dict = submitter_bg.get_asset_references_for_submission()
 
         # Provide both camelCase and snake_case keys: downstream plugins are
         # inconsistent (submit_to_deadline_cloud + add_publish_job_step read

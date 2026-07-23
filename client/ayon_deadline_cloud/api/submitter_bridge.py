@@ -10,14 +10,11 @@ is required.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import Any, Callable, Optional
 
 from deadline.client.api import get_queue_parameters
 
 from .submitter_registry import get_submitter_for_host
-
-if TYPE_CHECKING:
-    from deadline.client.job_bundle.submission import AssetReferences
 
 
 @dataclass
@@ -91,12 +88,13 @@ def _unified_submitter_bridge(
             initial_values=initial_values,
         )
 
-    def _asset_references(
-        _asset_references: Optional[AssetReferences] = None,
-    ) -> dict[str, Any]:
-        # get_asset_references now returns a typed AssetReferences (unified
-        # BaseSubmitter contract, deadline-cloud #1245); serialize to the dict
-        # shape the publish plugins write to asset_references.yaml.
+    def _asset_references() -> dict[str, Any]:
+        # The submitter is the single source of truth for asset references:
+        # it walks the live scene (unified BaseSubmitter contract,
+        # deadline-cloud #1245) and returns a typed AssetReferences, which we
+        # serialize to the dict shape the publish plugins write to
+        # asset_references.yaml. Callers no longer pass their own
+        # AssetReferences in — it was always ignored.
         return submitter.get_asset_references(settings).to_dict()
 
     return SubmitterBridge(
